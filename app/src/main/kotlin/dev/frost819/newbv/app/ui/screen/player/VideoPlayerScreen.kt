@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import dev.frost819.newbv.app.entity.player.VideoListItem
 import dev.frost819.newbv.app.ui.component.comment.CommentDialogMode
@@ -47,6 +48,7 @@ import dev.frost819.newbv.danmaku.component.DanmakuPlayerCompose
 import dev.frost819.newbv.danmaku.util.DanmakuMaskFinder
 import dev.frost819.newbv.danmaku.util.calculateMaskDelay
 import dev.frost819.newbv.danmaku.util.danmakuMask
+import dev.frost819.newbv.data.datastore.Prefs
 import dev.frost819.newbv.player.BvVideoPlayer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
@@ -77,6 +79,12 @@ fun VideoPlayerScreen(
 
     val uiState by playerViewModel.uiState.collectAsState()
     val seekerState = playerViewModel.seekerState.collectAsState()
+    val downloadSnapshot =
+        if (Prefs.parallelDownloadEnabled && Prefs.showParallelDownloads) {
+            playerViewModel.downloadSnapshot.collectAsStateWithLifecycle().value
+        } else {
+            null
+        }
     val danmakuState by danmakuViewModel.danmakuState.collectAsState()
     val danmakuMask by danmakuViewModel.danmakuMask.collectAsState()
     val videoListState by videoListViewModel.videoListState.collectAsState()
@@ -256,6 +264,7 @@ fun VideoPlayerScreen(
         videoShotCache = videoShotCache,
         uiState = mergedUiState,
         seekerState = seekerState,
+        downloadSnapshot = downloadSnapshot,
         onPlay = {
             logger.info { "[PLAYBACK] play aid=${uiState.aid}, cid=${uiState.cid}" }
             playerViewModel.togglePlayPause()

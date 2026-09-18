@@ -27,7 +27,19 @@ import androidx.media3.exoplayer.upstream.ParsingLoadable
 import dev.frost819.newbv.player.AbstractVideoPlayer
 import dev.frost819.newbv.player.OkHttpUtil
 import dev.frost819.newbv.player.VideoPlayerOptions
+import dev.frost819.newbv.player.download.DownloadMonitor
+import dev.frost819.newbv.player.download.DownloadSnapshot
+import dev.frost819.newbv.player.download.ParallelDownloadSession
+import dev.frost819.newbv.player.download.VodPlaybackSource
 import dev.frost819.newbv.player.formatMinSec
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.util.Locale
@@ -73,10 +85,27 @@ class ExoMediaPlayer(
     private var behindLiveWindowRecoverCount = 0
     private var behindLiveWindowLastRecoverAtMs = 0L
 
+    private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val _downloadSnapshot = MutableStateFlow(DownloadSnapshot())
+
+    /** Stable flow across source, representation, and downloader session changes. */
+    override val downloadSnapshot = _downloadSnapshot.asStateFlow()
+
+    private var downloadSession: ParallelDownloadSession? = null
+    private var downloadMonitor: DownloadMonitor? = null
+    private var downloadSnapshotJob: Job? = null
+    private var vodSource: VodPlaybackSource? = null
+    private var requestHeaders =
+        options.parallelDownload.requestHeaders +
+            buildMap {
+                options.userAgent?.let { put("User-Agent", it) }
+                options.referer?.let { put("Referer", it) }
+            }
+    private val httpClient = OkHttpUtil.generateCustomSslOkHttpClient(context)
     private val httpDataSourceFactory =
-        OkHttpDataSource.Factory(OkHttpUtil.generateCustomSslOkHttpClient(context)).apply {
+        OkHttpDataSource.Factory(httpClient).apply {
             options.userAgent?.let { setUserAgent(it) }
-            options.referer?.let { setDefaultRequestProperties(mapOf("referer" to it)) }
+            setDefaultRequestProperties(requestHeaders)
         }
 
     private val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
@@ -126,13 +155,17 @@ class ExoMediaPlayer(
     }
 
     override fun setHeader(headers: Map<String, String>) {
-        // ExoPlayer 通过 dataSourceFactory 设置默认请求头，此方法预留
+        requestHeaders = requestHeaders + headers
+        httpDataSourceFactory.setDefaultRequestProperties(requestHeaders)
     }
 
     override fun playUrl(
         videoUrl: String?,
         audioUrl: String?,
     ) {
+        mPlayer?.stop()
+        closeDownloadSession()
+        vodSource = null
         streamProtocol = resolveStreamProtocol(videoUrl, audioUrl)
         val videoMediaSource = videoUrl?.let { createMediaSource(it) }
         val audioMediaSource = audioUrl?.let { createMediaSource(it) }
@@ -145,6 +178,50 @@ class ExoMediaPlayer(
             } else {
                 mediaSources.firstOrNull()
             }
+    }
+
+    override fun playSource(source: VodPlaybackSource) {
+        if (!options.parallelDownload.enabled) {
+            super.playSource(source)
+            return
+        }
+        mPlayer?.stop()
+        closeDownloadSession()
+        vodSource = source
+        streamProtocol = "DASH"
+        val config = options.parallelDownload.copy(requestHeaders = requestHeaders)
+        val monitor = DownloadMonitor(config)
+        val session = ParallelDownloadSession(httpClient, config, source, monitor)
+        downloadMonitor = monitor
+        downloadSession = session
+        downloadSnapshotJob =
+            downloadScope.launch {
+                monitor.snapshots.collect { _downloadSnapshot.value = it }
+            }
+        val sources =
+            listOfNotNull(source.video, source.audio).mapNotNull { track ->
+                track.urls.firstOrNull()?.let { url ->
+                    DefaultMediaSourceFactory(session.factory(track, dataSourceFactory))
+                        .createMediaSource(MediaItem.fromUri(url))
+                }
+            }
+        mMediaSource =
+            if (sources.size > 1) {
+                @Suppress("SpreadOperator")
+                MergingMediaSource(*sources.toTypedArray())
+            } else {
+                sources.firstOrNull()
+            }
+    }
+
+    private fun closeDownloadSession() {
+        downloadSnapshotJob?.cancel()
+        downloadSnapshotJob = null
+        downloadSession?.close()
+        downloadSession = null
+        downloadMonitor?.close()
+        downloadMonitor = null
+        _downloadSnapshot.value = DownloadSnapshot()
     }
 
     /**
@@ -196,6 +273,8 @@ class ExoMediaPlayer(
     }
 
     override fun prepare() {
+        // A stopped session cannot be reused: recreate its request budget and workers.
+        if (downloadSession == null) vodSource?.let { playSource(it) }
         mMediaSource?.let {
             mPlayer?.setMediaSource(it)
             mPlayer?.prepare()
@@ -212,10 +291,14 @@ class ExoMediaPlayer(
 
     override fun stop() {
         mPlayer?.stop()
+        closeDownloadSession()
     }
 
     override fun reset() {
-        TODO("Not yet implemented")
+        stop()
+        mPlayer?.clearMediaItems()
+        mMediaSource = null
+        vodSource = null
     }
 
     override val isPlaying: Boolean
@@ -226,7 +309,12 @@ class ExoMediaPlayer(
     }
 
     override fun release() {
+        closeDownloadSession()
+        downloadScope.cancel()
+        vodSource = null
+        mMediaSource = null
         mPlayer?.release()
+        mPlayer = null
     }
 
     override val currentPosition: Long

@@ -1,6 +1,7 @@
 package dev.frost819.newbv.app.ui.component.player
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,6 +15,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.frost819.newbv.core.theme.BVTheme
+import dev.frost819.newbv.player.download.DownloadSnapshot
 
 /**
  * 视频进度条。
@@ -30,6 +32,7 @@ import dev.frost819.newbv.core.theme.BVTheme
  * @param position 当前播放位置（毫秒）
  * @param bufferedPercentage 缓冲百分比（0-100）
  * @param isPersistentSeek 是否为常显模式
+ * @param downloadSnapshot Optional index-mapped download lanes; null hides the visualization.
  */
 @Composable
 fun VideoProgressSeek(
@@ -38,49 +41,55 @@ fun VideoProgressSeek(
     position: Long,
     bufferedPercentage: Int,
     isPersistentSeek: Boolean,
+    downloadSnapshot: DownloadSnapshot? = null,
 ) {
     val colors: SliderColors = SliderDefaults.colors()
     val trackWidthDp = if (isPersistentSeek) 2.dp else 8.dp
 
-    Canvas(
-        modifier =
-            modifier
-                .fillMaxWidth()
-                .height(trackWidthDp)
-                .clip(RoundedCornerShape(50)),
-    ) {
-        val trackWidthPx = trackWidthDp.toPx()
-
-        // 背景轨道
-        drawLine(
-            color = colors.inactiveTrackColor,
-            start = Offset(0f, center.y),
-            end = Offset(size.width, center.y),
-            strokeWidth = trackWidthPx,
-            cap = StrokeCap.Round,
-        )
-
-        // 缓冲进度（仅交互模式显示）
-        if (!isPersistentSeek && bufferedPercentage > 0) {
-            drawLine(
-                color = colors.disabledActiveTrackColor,
-                start = Offset(trackWidthPx / 2, center.y),
-                end = Offset(size.width * bufferedPercentage / 100, center.y),
-                strokeWidth = trackWidthPx,
-                cap = StrokeCap.Round,
-            )
+    Column(modifier = modifier.fillMaxWidth()) {
+        if (downloadSnapshot != null) {
+            DownloadBlockLanes(snapshot = downloadSnapshot, duration = duration)
         }
+        Canvas(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(trackWidthDp)
+                    .clip(RoundedCornerShape(50)),
+        ) {
+            val trackWidthPx = trackWidthDp.toPx()
 
-        // 播放进度
-        if (duration > 0) {
-            val progressRatio = (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+            // 背景轨道
             drawLine(
-                color = colors.activeTrackColor,
-                start = Offset(trackWidthPx / 2, center.y),
-                end = Offset(size.width * progressRatio, center.y),
+                color = colors.inactiveTrackColor,
+                start = Offset(0f, center.y),
+                end = Offset(size.width, center.y),
                 strokeWidth = trackWidthPx,
                 cap = StrokeCap.Round,
             )
+
+            // 缓冲进度（仅交互模式显示）
+            if (!isPersistentSeek && bufferedPercentage > 0) {
+                drawLine(
+                    color = colors.disabledActiveTrackColor,
+                    start = Offset(trackWidthPx / 2, center.y),
+                    end = Offset(size.width * bufferedPercentage / 100, center.y),
+                    strokeWidth = trackWidthPx,
+                    cap = StrokeCap.Round,
+                )
+            }
+
+            // 播放进度
+            if (duration > 0) {
+                val progressRatio = (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+                drawLine(
+                    color = colors.activeTrackColor,
+                    start = Offset(trackWidthPx / 2, center.y),
+                    end = Offset(size.width * progressRatio, center.y),
+                    strokeWidth = trackWidthPx,
+                    cap = StrokeCap.Round,
+                )
+            }
         }
     }
 }

@@ -1,5 +1,7 @@
 package dev.frost819.newbv.player
 
+import dev.frost819.newbv.player.download.ParallelDownloadConfig
+
 /**
  * 播放器配置选项。
  *
@@ -13,4 +15,6 @@ data class VideoPlayerOptions(
     val referer: String? = null,
     val enableFfmpegAudioRenderer: Boolean = false,
     val enableSoftwareVideoDecoder: Boolean = false,
+    /** Opt-in VOD range transport and independent telemetry visualization. */
+    val parallelDownload: ParallelDownloadConfig = ParallelDownloadConfig(),
 )

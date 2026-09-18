@@ -3,6 +3,8 @@ package dev.frost819.newbv.app.ui.component.player
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -45,6 +47,7 @@ import dev.frost819.newbv.app.ui.state.player.SeekerState
 import dev.frost819.newbv.app.util.VideoShotImageCache
 import dev.frost819.newbv.biliapi.entity.video.Subtitle
 import dev.frost819.newbv.data.datastore.Prefs
+import dev.frost819.newbv.player.download.DownloadSnapshot
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -64,6 +67,8 @@ import kotlinx.coroutines.launch
  * 6. ControllerVideoInfo — 信息栏 + 进度条 + 按钮
  * 7. VideoListController — 分集列表
  * 8. MenuController — 设置菜单
+ *
+ * @param downloadSnapshot Optional download lanes/count, shared by expanded and persistent progress bars.
  */
 @Composable
 @Suppress("LongParameterList", "CyclomaticComplexMethod")
@@ -74,6 +79,7 @@ fun VideoPlayerController(
     videoShotCache: VideoShotImageCache,
     uiState: PlayerUiState,
     seekerState: State<SeekerState>,
+    downloadSnapshot: DownloadSnapshot? = null,
     onPlay: () -> Unit,
     onPause: () -> Unit,
     onExit: () -> Unit,
@@ -475,13 +481,21 @@ fun VideoPlayerController(
 
         // 常显进度条
         if (showPersistentSeek && !showInfoSeekController) {
-            VideoProgressSeek(
-                modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter),
-                duration = seekerState.value.totalDuration,
-                position = seekerState.value.currentTime,
-                bufferedPercentage = seekerState.value.bufferedPercentage,
-                isPersistentSeek = true,
-            )
+            Column(
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+                horizontalAlignment = Alignment.End,
+            ) {
+                if (downloadSnapshot != null) {
+                    DownloadRequestStatus(downloadSnapshot, Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+                }
+                VideoProgressSeek(
+                    duration = seekerState.value.totalDuration,
+                    position = seekerState.value.currentTime,
+                    bufferedPercentage = seekerState.value.bufferedPercentage,
+                    isPersistentSeek = true,
+                    downloadSnapshot = downloadSnapshot,
+                )
+            }
         }
 
         // 字幕
@@ -537,6 +551,7 @@ fun VideoPlayerController(
             isSeeking = isSeeking,
             goTime = goTime,
             seekerState = seekerState.value,
+            downloadSnapshot = downloadSnapshot,
             title = uiState.title,
             clock = uiState.clock,
             onlineWatching = uiState.onlineWatching,

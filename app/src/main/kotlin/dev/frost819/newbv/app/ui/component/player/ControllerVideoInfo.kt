@@ -63,6 +63,7 @@ import dev.frost819.newbv.app.util.formatHourMinSec
 import dev.frost819.newbv.biliapi.entity.video.VideoShot
 import dev.frost819.newbv.core.focus.touchClickable
 import dev.frost819.newbv.core.theme.BVTheme
+import dev.frost819.newbv.player.download.DownloadSnapshot
 import kotlinx.coroutines.delay
 
 /**
@@ -76,6 +77,7 @@ import kotlinx.coroutines.delay
  * @param isSeeking 是否正在 seek
  * @param goTime seek 预览位置（毫秒）
  * @param seekerState 进度条状态
+ * @param downloadSnapshot Optional download visualization and active request count.
  * @param title 视频标题
  * @param clock 时钟（hour, minute）
  * @param onlineWatching 同时观看人数文案（空串时不显示）
@@ -105,6 +107,7 @@ fun ControllerVideoInfo(
     isSeeking: Boolean,
     goTime: Long,
     seekerState: SeekerState,
+    downloadSnapshot: DownloadSnapshot? = null,
     title: String,
     clock: Pair<Int, Int>,
     onlineWatching: String,
@@ -154,6 +157,7 @@ fun ControllerVideoInfo(
                 isSeeking = isSeeking,
                 goTime = goTime,
                 seekerState = seekerState,
+                downloadSnapshot = downloadSnapshot,
                 videoShot = videoShot,
                 videoShotCache = videoShotCache,
                 isPgc = isPgc,
@@ -265,6 +269,7 @@ fun ControllerVideoInfoBottom(
     isSeeking: Boolean,
     goTime: Long,
     seekerState: SeekerState,
+    downloadSnapshot: DownloadSnapshot? = null,
     videoShot: VideoShot?,
     videoShotCache: VideoShotImageCache,
     isPgc: Boolean,
@@ -317,7 +322,11 @@ fun ControllerVideoInfoBottom(
         }
 
         // 时间显示
-        Row(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(end = 24.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             val timeText = if (isSeeking) goTime.formatHourMinSec() else seekerState.currentTime.formatHourMinSec()
             Text(
                 modifier = Modifier.padding(bottom = 2.dp, start = 24.dp),
@@ -325,6 +334,7 @@ fun ControllerVideoInfoBottom(
                 color = Color.White,
                 style = TextStyle(shadow = Shadow(color = Color.Black, blurRadius = 1f)),
             )
+            if (downloadSnapshot != null) DownloadRequestStatus(downloadSnapshot)
         }
 
         // Seek bar（可聚焦，处理方向键 + 触屏拖拽）
@@ -412,6 +422,7 @@ fun ControllerVideoInfoBottom(
                 position = if (isSeeking) goTime else seekerState.currentTime,
                 bufferedPercentage = seekerState.bufferedPercentage,
                 isPersistentSeek = false,
+                downloadSnapshot = downloadSnapshot,
             )
         }
 

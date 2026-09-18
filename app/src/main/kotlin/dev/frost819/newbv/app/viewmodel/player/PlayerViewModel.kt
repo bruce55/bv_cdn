@@ -35,6 +35,12 @@ import dev.frost819.newbv.data.datastore.VideoCodec
 import dev.frost819.newbv.player.AbstractVideoPlayer
 import dev.frost819.newbv.player.VideoPlayerListener
 import dev.frost819.newbv.player.VideoPlayerOptions
+import dev.frost819.newbv.player.download.CdnMode
+import dev.frost819.newbv.player.download.DownloadSnapshot
+import dev.frost819.newbv.player.download.DownloadTrack
+import dev.frost819.newbv.player.download.MediaTrackSource
+import dev.frost819.newbv.player.download.ParallelDownloadConfig
+import dev.frost819.newbv.player.download.VodPlaybackSource
 import dev.frost819.newbv.player.impl.exo.ExoPlayerFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -103,6 +109,13 @@ class PlayerViewModel
         var videoPlayer: AbstractVideoPlayer? by mutableStateOf(null)
             private set
 
+        private val _downloadSnapshot = MutableStateFlow(DownloadSnapshot())
+
+        /** Current downloader activity, stable across player recreation and quality changes. */
+        val downloadSnapshot = _downloadSnapshot.asStateFlow()
+
+        private var downloadSnapshotJob: Job? = null
+        private var parallelDownloadConfig = ParallelDownloadConfig()
         private var playData: PlayData? = null
 
         private val detachedWorkScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -347,6 +360,19 @@ class PlayerViewModel
          */
         fun initVideoPlayer(context: Context) {
             val apiType = Prefs.apiType
+            parallelDownloadConfig =
+                ParallelDownloadConfig(
+                    enabled = Prefs.parallelDownloadEnabled,
+                    maxRequests = Prefs.parallelDownloadRequests.coerceIn(2, 8),
+                    mode =
+                        when {
+                            Prefs.cdnOverrideHost.isNotBlank() -> CdnMode.Pinned
+                            Prefs.parallelDownloadMode == "overseas" -> CdnMode.Overseas
+                            else -> CdnMode.Mainland
+                        },
+                    pinnedHost = Prefs.cdnOverrideHost,
+                    visualizationEnabled = Prefs.showParallelDownloads,
+                )
             val options =
                 VideoPlayerOptions(
                     userAgent =
@@ -359,11 +385,19 @@ class PlayerViewModel
                         ),
                     enableFfmpegAudioRenderer = Prefs.enableFfmpegAudioRenderer,
                     enableSoftwareVideoDecoder = Prefs.enableSoftwareVideoDecoder,
+                    parallelDownload = parallelDownloadConfig,
                 )
 
             val newPlayer = exoPlayerFactory.create(context.applicationContext, options)
             newPlayer.setPlayerEventListener(videoPlayerListener)
+            downloadSnapshotJob?.cancel()
+            videoPlayer?.release()
             videoPlayer = newPlayer
+            _downloadSnapshot.value = DownloadSnapshot()
+            downloadSnapshotJob =
+                viewModelScope.launch {
+                    newPlayer.downloadSnapshot.collect { _downloadSnapshot.value = it }
+                }
 
             val initialSpeed = Prefs.defaultPlaySpeed.speed
             _uiState.update { it.copy(playSpeed = initialSpeed) }
@@ -373,6 +407,9 @@ class PlayerViewModel
         /** 释放播放器资源，同步进度到 B 站。 */
         fun detachPlayer() {
             syncProgress(scope = detachedWorkScope, isDetaching = true)
+            downloadSnapshotJob?.cancel()
+            downloadSnapshotJob = null
+            _downloadSnapshot.value = DownloadSnapshot()
             videoPlayer?.release()
             videoPlayer = null
             stopSeekerUpdater()
@@ -771,7 +808,7 @@ class PlayerViewModel
                 val currentPosition = player.currentPosition
                 val mediaUrls = resolveMediaUrls(new.qualityId, new.videoCodec, new.audio)
                 if (mediaUrls != null) {
-                    player.playUrl(mediaUrls.videoUrl, mediaUrls.audioUrl)
+                    player.playSource(mediaUrls.source)
                     player.prepare()
                     if (currentPosition > 0) player.seekTo(currentPosition)
                     player.start()
@@ -988,9 +1025,38 @@ class PlayerViewModel
             val audioUrl = if (audioUrls.isNotEmpty()) selectOfficialCdnUrl(audioUrls) else null
 
             _uiState.update { it.copy(videoHeight = foundVideo.height, videoWidth = foundVideo.width) }
+            // Route discovery needs the untouched signed base and backup URLs. Legacy playback
+            // retains its existing official-CDN preference and manual host replacement.
+            val videoCandidates =
+                if (parallelDownloadConfig.enabled) {
+                    videoUrls.filterNotNull().filter { it.isNotBlank() }.distinct()
+                } else {
+                    listOf(CdnOverride.apply(videoUrl, Prefs.cdnOverrideHost))
+                }
+            val audioCandidates =
+                if (parallelDownloadConfig.enabled) {
+                    audioUrls.filter { it.isNotBlank() }.distinct()
+                } else {
+                    listOfNotNull(audioUrl?.let { CdnOverride.apply(it, Prefs.cdnOverrideHost) })
+                }
             return MediaUrls(
-                CdnOverride.apply(videoUrl, Prefs.cdnOverrideHost),
-                audioUrl?.let { CdnOverride.apply(it, Prefs.cdnOverrideHost) },
+                VodPlaybackSource(
+                    contentId = "${state.aid}:${state.cid}",
+                    video =
+                        MediaTrackSource(
+                            id = "${state.cid}:video:${foundVideo.quality}:${foundVideo.codecId}:${foundVideo.codecs}",
+                            kind = DownloadTrack.Video,
+                            urls = videoCandidates,
+                        ),
+                    audio =
+                        audioItem?.let {
+                            MediaTrackSource(
+                                id = "${state.cid}:audio:${it.codecId}:${it.bandwidth}",
+                                kind = DownloadTrack.Audio,
+                                urls = audioCandidates,
+                            )
+                        },
+                ),
             )
         }
 
@@ -1000,7 +1066,7 @@ class PlayerViewModel
                     logger.error { "VideoPlayer is not initialized!" }
                     return
                 }
-            player.playUrl(mediaUrls.videoUrl, mediaUrls.audioUrl)
+            player.playSource(mediaUrls.source)
             player.prepare()
             player.start()
         }
@@ -1297,12 +1363,13 @@ class PlayerViewModel
         )
 
         private data class MediaUrls(
-            val videoUrl: String,
-            val audioUrl: String?,
+            val source: VodPlaybackSource,
         )
 
         override fun onCleared() {
             super.onCleared()
+            videoPlayer?.release()
+            videoPlayer = null
             detachedWorkScope.cancel()
         }
     }

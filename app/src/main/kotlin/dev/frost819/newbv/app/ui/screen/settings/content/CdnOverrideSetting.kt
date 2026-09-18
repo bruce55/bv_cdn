@@ -12,9 +12,10 @@ import androidx.tv.material3.Text
 import dev.frost819.newbv.app.entity.CdnOverrideCatalog
 import dev.frost819.newbv.app.ui.component.settings.OptionDialog
 import dev.frost819.newbv.app.ui.component.settings.SettingListItem
+import dev.frost819.newbv.app.ui.component.settings.SettingSwitchListItem
 import dev.frost819.newbv.data.datastore.Prefs
 
-/** VOD region/node selection; choosing the default restores upstream automatic CDN selection. */
+/** Independent VOD acceleration/visualization settings and an optional pinned CDN override. */
 @Composable
 fun CdnOverrideSetting() {
     var host by rememberSaveable { mutableStateOf(Prefs.cdnOverrideHost) }
@@ -22,6 +23,12 @@ fun CdnOverrideSetting() {
     var showNodes by rememberSaveable { mutableStateOf(false) }
     var showCustom by rememberSaveable { mutableStateOf(false) }
     var customInput by rememberSaveable { mutableStateOf("") }
+    var accelerated by rememberSaveable { mutableStateOf(Prefs.parallelDownloadEnabled) }
+    var visualization by rememberSaveable { mutableStateOf(Prefs.showParallelDownloads) }
+    var requestLimit by rememberSaveable { mutableStateOf(Prefs.parallelDownloadRequests) }
+    var mode by rememberSaveable { mutableStateOf(Prefs.parallelDownloadMode) }
+    var showMode by rememberSaveable { mutableStateOf(false) }
+    var showRequests by rememberSaveable { mutableStateOf(false) }
     val region = CdnOverrideCatalog.regionForHost(host)
     val nodes = CdnOverrideCatalog.nodesForRegion(region)
     val saveHost: (String) -> Unit = {
@@ -29,9 +36,68 @@ fun CdnOverrideSetting() {
         Prefs.cdnOverrideHost = it
     }
 
+    SettingSwitchListItem(
+        title = "并行下载加速（实验性）",
+        supportText = "点播视频与音频共享并发额度，下次加载生效",
+        checked = accelerated,
+        onCheckedChange = {
+            accelerated = it
+            Prefs.parallelDownloadEnabled = it
+        },
+    )
+    SettingSwitchListItem(
+        title = "显示下载分块",
+        supportText = "下次加载生效。加速开启时显示视频/音频分块与活跃下载数；空框待下载，蓝色下载中，绿色完成，橙色重试",
+        checked = visualization,
+        onCheckedChange = {
+            visualization = it
+            Prefs.showParallelDownloads = it
+        },
+    )
+    if (accelerated) {
+        SettingListItem(
+            title = "最大并发下载数",
+            supportText = "$requestLimit（视频、音频和重试共用，下次加载生效）",
+            onClick = { showRequests = true },
+        )
+        SettingListItem(
+            title = "自动 CDN 范围",
+            supportText =
+                when {
+                    host.isNotEmpty() -> "已固定节点：$host（自动选择不生效）"
+                    mode == "overseas" -> "海外（下次加载生效）"
+                    else -> "中国大陆（下次加载生效）"
+                },
+            onClick = { showMode = true },
+        )
+    }
+    if (showMode) {
+        OptionDialog(
+            options = arrayOf("mainland", "overseas"),
+            selectedOption = mode,
+            onDismiss = { showMode = false },
+            onSelect = {
+                mode = it
+                Prefs.parallelDownloadMode = it
+            },
+            getDisplayName = { if (it == "overseas") "海外" else "中国大陆" },
+        )
+    }
+    if (showRequests) {
+        OptionDialog(
+            options = arrayOf(4, 8),
+            selectedOption = requestLimit,
+            onDismiss = { showRequests = false },
+            onSelect = {
+                requestLimit = it
+                Prefs.parallelDownloadRequests = it
+            },
+            getDisplayName = { "$it" },
+        )
+    }
     SettingListItem(
-        title = "播放源地区覆盖",
-        supportText = "当前：$region（点播视频与音频，下次加载生效）",
+        title = "手动固定 CDN 节点",
+        supportText = "当前：$region（固定节点优先于自动选择；选择默认恢复自动，下次加载生效）",
         onClick = { showRegions = true },
     )
     if (host.isNotEmpty()) {

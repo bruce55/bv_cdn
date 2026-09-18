@@ -229,6 +229,18 @@ object Prefs {
     /** 无痕模式（不记录历史）。 */
     var incognitoMode by pref(PrefKeys.incognitoMode, false)
 
+    /** Enables bounded parallel VOD range downloading; off until explicitly enabled. */
+    var parallelDownloadEnabled by pref(PrefKeys.parallelDownloadEnabled, false)
+
+    /** Shared active-request budget for video, audio and retries. */
+    var parallelDownloadRequests by pref(PrefKeys.parallelDownloadRequests, 4)
+
+    /** Automatic CDN route preference: mainland or overseas. */
+    var parallelDownloadMode by pref(PrefKeys.parallelDownloadMode, "mainland")
+
+    /** Independently enables indexed download blocks and the active-request counter. */
+    var showParallelDownloads by pref(PrefKeys.showParallelDownloads, false)
+
     /** Optional VOD CDN authority; empty keeps upstream automatic selection. */
     var cdnOverrideHost by pref(PrefKeys.cdnOverrideHost, "")
 

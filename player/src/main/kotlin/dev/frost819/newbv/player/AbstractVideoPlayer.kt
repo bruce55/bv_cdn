@@ -1,5 +1,11 @@
 package dev.frost819.newbv.player
 
+import dev.frost819.newbv.player.download.DownloadSnapshot
+import dev.frost819.newbv.player.download.VodPlaybackSource
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
 /**
  * 视频播放器抽象基类。
  *
@@ -32,6 +38,14 @@ abstract class AbstractVideoPlayer {
         videoUrl: String? = null,
         audioUrl: String? = null,
     )
+
+    /** Current VOD download telemetry; engines without acceleration expose an empty snapshot. */
+    open val downloadSnapshot: StateFlow<DownloadSnapshot> = MutableStateFlow(DownloadSnapshot()).asStateFlow()
+
+    /** Play selected VOD representations while retaining their original and backup routes. */
+    open fun playSource(source: VodPlaybackSource) {
+        playUrl(source.video?.urls?.firstOrNull(), source.audio?.urls?.firstOrNull())
+    }
 
     /** 准备开始播放（加载流、初始化解码器） */
     abstract fun prepare()

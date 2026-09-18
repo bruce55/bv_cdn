@@ -29,6 +29,7 @@ import dev.frost819.newbv.data.datastore.Resolution
 import dev.frost819.newbv.data.datastore.VideoCodec
 import dev.frost819.newbv.player.AbstractVideoPlayer
 import dev.frost819.newbv.player.VideoPlayerListener
+import dev.frost819.newbv.player.download.ParallelDownloadConfig
 import dev.frost819.newbv.player.impl.exo.ExoPlayerFactory
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -133,9 +134,11 @@ class PlayerViewModelTest {
             updateUiState { it.copy(mediaProfileState = it.mediaProfileState.copy(qualityId = 80)) }
             viewModel.updateMediaProfile(MediaProfileSettingAction.SetQuality(116))
             verify {
-                mockPlayer.playUrl(
-                    "https://cdn.example.com/video?sign=A%2FB",
-                    "https://cdn.example.com/audio?sign=C%2BD",
+                mockPlayer.playSource(
+                    match {
+                        it.video?.urls == listOf("https://cdn.example.com/video?sign=A%2FB") &&
+                            it.audio?.urls == listOf("https://cdn.example.com/audio?sign=C%2BD")
+                    },
                 )
             }
         }
@@ -148,7 +151,40 @@ class PlayerViewModelTest {
         setVideoPlayer(mockPlayer)
         updateUiState { it.copy(mediaProfileState = it.mediaProfileState.copy(qualityId = 80)) }
         viewModel.updateMediaProfile(MediaProfileSettingAction.SetQuality(116))
-        verify { mockPlayer.playUrl("https://a.bilivideo.com/video?sign=A%2FB", null) }
+        verify {
+            mockPlayer.playSource(
+                match {
+                    it.video?.urls == listOf("https://a.bilivideo.com/video?sign=A%2FB") && it.audio == null
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `accelerated quality changes retain signed original and backup candidates despite pinned host`() {
+        every { Prefs.cdnOverrideHost } returns "cdn.example.com"
+        PlayerViewModel::class.java
+            .getDeclaredField("parallelDownloadConfig")
+            .apply { isAccessible = true }
+            .set(viewModel, ParallelDownloadConfig(enabled = true))
+        setCdnPlayData(withAudio = true)
+        setVideoPlayer(mockPlayer)
+        updateUiState { it.copy(aid = 123, cid = 456, mediaProfileState = it.mediaProfileState.copy(qualityId = 80)) }
+        viewModel.updateMediaProfile(MediaProfileSettingAction.SetQuality(116))
+        verify {
+            mockPlayer.playSource(
+                match {
+                    it.contentId == "123:456" &&
+                        it.video?.id == "456:video:116:7:avc1.640028" &&
+                        it.video?.urls ==
+                        listOf(
+                            "https://a.mcdn.bilivideo.cn/video?sign=P2P",
+                            "https://a.bilivideo.com/video?sign=A%2FB",
+                        ) &&
+                        it.audio?.urls == listOf("https://a.bilivideo.com/audio?sign=C%2BD")
+                },
+            )
+        }
     }
 
     private fun setCdnPlayData(withAudio: Boolean) {

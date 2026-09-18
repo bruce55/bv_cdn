@@ -36,6 +36,10 @@ internal object PrefKeys {
     val incognitoMode = booleanPreferencesKey("im")
 
     // ===== 网络 & API =====
+    val parallelDownloadEnabled = booleanPreferencesKey("parallel_download_enabled")
+    val parallelDownloadRequests = intPreferencesKey("parallel_download_requests")
+    val parallelDownloadMode = stringPreferencesKey("parallel_download_mode")
+    val showParallelDownloads = booleanPreferencesKey("show_parallel_downloads")
     val cdnOverrideHost = stringPreferencesKey("cdn_override_host")
     val apiType = intPreferencesKey("api_type")
     val crashReportEnabled = booleanPreferencesKey("crash_report_enabled")
