@@ -45,6 +45,15 @@ class PrefsTest {
         tempDir.deleteRecursively()
     }
 
+    @Test
+    fun `CDN override defaults off and can be saved and cleared`() {
+        assertThat(Prefs.cdnOverrideHost).isEmpty()
+        Prefs.cdnOverrideHost = "cn-hk-eq-01-01.bilivideo.com"
+        assertThat(Prefs.cdnOverrideHost).isEqualTo("cn-hk-eq-01-01.bilivideo.com")
+        Prefs.cdnOverrideHost = ""
+        assertThat(Prefs.cdnOverrideHost).isEmpty()
+    }
+
     // ===== 默认值测试 =====
 
     @Test

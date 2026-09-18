@@ -229,6 +229,9 @@ object Prefs {
     /** 无痕模式（不记录历史）。 */
     var incognitoMode by pref(PrefKeys.incognitoMode, false)
 
+    /** Optional VOD CDN authority; empty keeps upstream automatic selection. */
+    var cdnOverrideHost by pref(PrefKeys.cdnOverrideHost, "")
+
     // --- 网络 & API（PRD 7.5） ---
 
     /** 接口类型（Web/App）。 */

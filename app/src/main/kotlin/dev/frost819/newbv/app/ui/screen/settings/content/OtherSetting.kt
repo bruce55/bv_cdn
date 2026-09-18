@@ -87,6 +87,8 @@ fun OtherSetting(
             },
         )
 
+        CdnOverrideSetting()
+
         if (BuildConfig.DEBUG) {
             SettingListItem(
                 title = "触发测试崩溃",

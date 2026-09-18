@@ -36,6 +36,7 @@ internal object PrefKeys {
     val incognitoMode = booleanPreferencesKey("im")
 
     // ===== 网络 & API =====
+    val cdnOverrideHost = stringPreferencesKey("cdn_override_host")
     val apiType = intPreferencesKey("api_type")
     val crashReportEnabled = booleanPreferencesKey("crash_report_enabled")
 

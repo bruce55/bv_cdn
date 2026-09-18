@@ -11,6 +11,7 @@
 
 # Gradle
 .gradle/
+.kotlin/
 gradle-app.setting
 
 # ========================================

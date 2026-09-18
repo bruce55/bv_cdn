@@ -15,6 +15,7 @@ import dev.frost819.newbv.app.ui.state.player.PlayerState
 import dev.frost819.newbv.app.ui.state.player.PlayerUiEffect
 import dev.frost819.newbv.app.ui.state.player.PlayerUiState
 import dev.frost819.newbv.app.ui.state.player.SeekerState
+import dev.frost819.newbv.app.util.CdnOverride
 import dev.frost819.newbv.app.util.PlayerConstants
 import dev.frost819.newbv.biliapi.entity.ApiType
 import dev.frost819.newbv.biliapi.entity.PlayData
@@ -987,7 +988,10 @@ class PlayerViewModel
             val audioUrl = if (audioUrls.isNotEmpty()) selectOfficialCdnUrl(audioUrls) else null
 
             _uiState.update { it.copy(videoHeight = foundVideo.height, videoWidth = foundVideo.width) }
-            return MediaUrls(videoUrl, audioUrl)
+            return MediaUrls(
+                CdnOverride.apply(videoUrl, Prefs.cdnOverrideHost),
+                audioUrl?.let { CdnOverride.apply(it, Prefs.cdnOverrideHost) },
+            )
         }
 
         private fun executePlayback(mediaUrls: MediaUrls) {

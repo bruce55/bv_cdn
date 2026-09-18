@@ -11,6 +11,9 @@ import dev.frost819.newbv.app.ui.action.player.MediaProfileSettingAction
 import dev.frost819.newbv.app.ui.state.player.PlayerState
 import dev.frost819.newbv.app.ui.state.player.PlayerUiEffect
 import dev.frost819.newbv.app.ui.state.player.PlayerUiState
+import dev.frost819.newbv.biliapi.entity.DashAudio
+import dev.frost819.newbv.biliapi.entity.DashVideo
+import dev.frost819.newbv.biliapi.entity.PlayData
 import dev.frost819.newbv.biliapi.entity.video.RelatedVideo
 import dev.frost819.newbv.biliapi.repositories.AuthRepository
 import dev.frost819.newbv.biliapi.repositories.CoinRepository
@@ -90,6 +93,7 @@ class PlayerViewModelTest {
 
         mockkObject(Prefs)
         every { Prefs.apiType } returns DataApiType.Web
+        every { Prefs.cdnOverrideHost } returns ""
         every { Prefs.defaultQuality } returns Resolution.R1080P
         every { Prefs.defaultVideoCodec } returns VideoCodec.AVC
         every { Prefs.defaultAudio } returns Audio.A192K
@@ -116,6 +120,72 @@ class PlayerViewModelTest {
                 favoriteRepository = favoriteRepository,
                 oneClickTripleActionRepository = oneClickTripleActionRepository,
             )
+    }
+
+    @Test
+    fun `quality changes apply CDN override to selected video and audio for both APIs`() {
+        for (api in DataApiType.entries) {
+            every { Prefs.apiType } returns api
+            every { Prefs.cdnOverrideHost } returns "cdn.example.com"
+            setCdnPlayData(withAudio = true)
+            mockPlayer = mockk(relaxed = true)
+            setVideoPlayer(mockPlayer)
+            updateUiState { it.copy(mediaProfileState = it.mediaProfileState.copy(qualityId = 80)) }
+            viewModel.updateMediaProfile(MediaProfileSettingAction.SetQuality(116))
+            verify {
+                mockPlayer.playUrl(
+                    "https://cdn.example.com/video?sign=A%2FB",
+                    "https://cdn.example.com/audio?sign=C%2BD",
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `default CDN choice keeps official fallback and missing audio stays null`() {
+        every { Prefs.cdnOverrideHost } returns ""
+        setCdnPlayData(withAudio = false)
+        setVideoPlayer(mockPlayer)
+        updateUiState { it.copy(mediaProfileState = it.mediaProfileState.copy(qualityId = 80)) }
+        viewModel.updateMediaProfile(MediaProfileSettingAction.SetQuality(116))
+        verify { mockPlayer.playUrl("https://a.bilivideo.com/video?sign=A%2FB", null) }
+    }
+
+    private fun setCdnPlayData(withAudio: Boolean) {
+        val data =
+            PlayData(
+                dashVideos =
+                    listOf(
+                        DashVideo(
+                            quality = 116,
+                            baseUrl = "https://a.mcdn.bilivideo.cn/video?sign=P2P",
+                            bandwidth = 1000,
+                            codecId = 7,
+                            width = 1920,
+                            height = 1080,
+                            frameRate = "30",
+                            backUrl = listOf("https://a.bilivideo.com/video?sign=A%2FB"),
+                            codecs = "avc1.640028",
+                        ),
+                    ),
+                dashAudios =
+                    if (withAudio) {
+                        listOf(
+                            DashAudio(
+                                baseUrl = "https://a.bilivideo.com/audio?sign=C%2BD",
+                                bandwidth = 100,
+                                codecId = Audio.A192K.code,
+                                backUrl = emptyList(),
+                            ),
+                        )
+                    } else {
+                        emptyList()
+                    },
+            )
+        PlayerViewModel::class.java
+            .getDeclaredField("playData")
+            .apply { isAccessible = true }
+            .set(viewModel, data)
     }
 
     @AfterEach
