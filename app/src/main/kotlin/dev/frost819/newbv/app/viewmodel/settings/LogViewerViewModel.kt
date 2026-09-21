@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 import java.net.Inet4Address
@@ -21,7 +22,7 @@ import javax.inject.Inject
  * 日志查看页 ViewModel。
  *
  * 管理 [HttpServer] 生命周期和日志文件列表。
- * 进入页面时启动 HTTP 服务器，离开时停止。
+ * 进入页面时启动 HTTP 服务器；启用播放下载日志后返回播放页仍继续记录。
  *
  * @param application 用于获取 filesDir 和 assets。
  * @param httpServer 本地 HTTP 日志服务器。
@@ -37,7 +38,11 @@ class LogViewerViewModel
     ) : AndroidViewModel(application) {
         private val logger = Loggers.get("LogViewerViewModel")
 
-        private val _uiState = MutableStateFlow(LogViewerUiState())
+        private val lifecycleLock = Any()
+        private var closed = false
+
+        private val _uiState =
+            MutableStateFlow(LogViewerUiState(downloadCapture = httpServer.isDownloadCaptureEnabled()))
         val uiState: StateFlow<LogViewerUiState> = _uiState.asStateFlow()
 
         init {
@@ -53,14 +58,44 @@ class LogViewerViewModel
          */
         private fun startServer() {
             viewModelScope.launch(Dispatchers.IO) {
-                httpServer.start()
-                val port = httpServer.getPort() ?: 0
-                val host = getLocalIpAddress()
-                _uiState.value =
-                    _uiState.value.copy(
-                        serverAddress = "$host:$port",
-                        isServerReady = port > 0,
-                    )
+                synchronized(lifecycleLock) {
+                    if (closed) return@synchronized
+                    runCatching { httpServer.start() }
+                        .onSuccess { updateServerAddress() }
+                        .onFailure {
+                            _uiState.update { it.copy(serverError = "日志服务器启动失败，请重试", isServerReady = false) }
+                        }
+                }
+            }
+        }
+
+        /** Toggles process-local playback capture; enabling also starts the LAN server. */
+        fun setDownloadCapture(enabled: Boolean) {
+            _uiState.update { it.copy(captureChanging = true) }
+            viewModelScope.launch(Dispatchers.IO) {
+                synchronized(lifecycleLock) {
+                    if (closed) return@synchronized
+                    runCatching { httpServer.setDownloadCapture(enabled) }
+                        .onSuccess { updateServerAddress() }
+                        .onFailure {
+                            _uiState.update { it.copy(serverError = "日志服务器启动失败，请重试") }
+                        }
+                    _uiState.update {
+                        it.copy(downloadCapture = httpServer.isDownloadCaptureEnabled(), captureChanging = false)
+                    }
+                }
+            }
+        }
+
+        private fun updateServerAddress() {
+            val port = httpServer.getPort() ?: 0
+            val host = getLocalIpAddress()
+            _uiState.update {
+                it.copy(
+                    serverAddress = "$host:$port",
+                    isServerReady = port > 0 && host.isNotBlank(),
+                    serverError = if (host.isBlank()) "未找到局域网地址" else null,
+                )
             }
         }
 
@@ -74,9 +109,9 @@ class LogViewerViewModel
                 val logs =
                     (
                         crashHandler.listManualLogs() +
-                            crashHandler.listCrashLogs()
+                            crashHandler.listCrashLogs() + crashHandler.listBufferingLogs()
                     ).sortedByDescending { it.lastModified() }
-                _uiState.value = _uiState.value.copy(logFiles = logs)
+                _uiState.update { it.copy(logFiles = logs) }
             }
         }
 
@@ -114,7 +149,10 @@ class LogViewerViewModel
         }
 
         override fun onCleared() {
-            httpServer.stop()
+            synchronized(lifecycleLock) {
+                closed = true
+                httpServer.stopUnlessCapturing()
+            }
             super.onCleared()
         }
 
@@ -142,6 +180,7 @@ class LogViewerViewModel
             when {
                 file.name.startsWith(CrashHandler.MANUAL_LOG_PREFIX) -> "手动日志"
                 file.name.startsWith(CrashHandler.CRASH_LOG_PREFIX) -> "崩溃日志"
+                file.name.startsWith("logs_buffering_") -> "卡顿日志"
                 else -> "未知"
             }
     }
@@ -157,4 +196,7 @@ data class LogViewerUiState(
     val logFiles: List<File> = emptyList(),
     val serverAddress: String = "",
     val isServerReady: Boolean = false,
+    val downloadCapture: Boolean = false,
+    val captureChanging: Boolean = false,
+    val serverError: String? = null,
 )

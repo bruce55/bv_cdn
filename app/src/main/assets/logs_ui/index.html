@@ -132,6 +132,7 @@
     <mdui-top-app-bar variant="center-aligned" style="background-color: rgba(var(--mdui-color-primary-container));color: rgba(var(--mdui-color-on-primary-container))">
         <mdui-button-icon></mdui-button-icon>
         <mdui-top-app-bar-title>日志管理</mdui-top-app-bar-title>
+        <mdui-button href="/logs_ui/download.html" variant="text">播放下载日志</mdui-button>
         <div style="flex-grow: 1"></div>
         <mdui-button-icon id="btnOpenCreateDialog" icon="sim_card_download" style="color: rgba(var(--mdui-color-primary))"></mdui-button-icon>
     </mdui-top-app-bar>
@@ -152,6 +153,10 @@
             </div>
         </mdui-tab-panel>
 
+        <mdui-tab value="tab-3">卡顿日志</mdui-tab>
+        <mdui-tab-panel slot="panel" value="tab-3">
+            <div class="panel"><div id="bufferingLogList" class="log-list"></div></div>
+        </mdui-tab-panel>
     </mdui-tabs>
 
     <mdui-dialog id="createLogDialog" headline="手动保存日志">

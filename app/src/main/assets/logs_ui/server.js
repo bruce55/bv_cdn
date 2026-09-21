@@ -101,12 +101,14 @@
   function splitItems(items) {
     var manual = [];
     var crash = [];
+    var buffering = [];
 
     for (var i = 0; i < items.length; i++) {
       var it = items[i] || {};
       var type = it.type || inferTypeFromName(it.name);
       if (type === "manual") manual.push(it);
       else if (type === "crash") crash.push(it);
+      else if (type === "buffering") buffering.push(it);
     }
 
     manual.sort(function (a, b) {
@@ -115,7 +117,8 @@
     crash.sort(function (a, b) {
       return (b.lastModified || 0) - (a.lastModified || 0);
     });
-    return { manual: manual, crash: crash };
+    buffering.sort(function(a,b) { return (b.lastModified || 0) - (a.lastModified || 0); });
+    return { manual: manual, crash: crash, buffering: buffering };
   }
 
   var state = {
@@ -132,6 +135,8 @@
     var split = splitItems(items);
     renderList(manualEl, split.manual);
     renderList(crashEl, split.crash);
+    var bufferingEl = $("bufferingLogList");
+    if (bufferingEl) renderList(bufferingEl, split.buffering);
   }
 
   async function createManualAndDownload() {

@@ -363,15 +363,17 @@ class PlayerViewModel
             parallelDownloadConfig =
                 ParallelDownloadConfig(
                     enabled = Prefs.parallelDownloadEnabled,
-                    maxRequests = Prefs.parallelDownloadRequests.coerceIn(2, 8),
+                    maxRequests = Prefs.parallelDownloadRequests.coerceIn(2, 64),
+                    minimumBlockKiB = Prefs.minimumDownloadBlockKiB,
                     mode =
                         when {
-                            Prefs.cdnOverrideHost.isNotBlank() -> CdnMode.Pinned
+                            !Prefs.parallelDownloadEnabled && Prefs.cdnOverrideHost.isNotBlank() -> CdnMode.Pinned
                             Prefs.parallelDownloadMode == "overseas" -> CdnMode.Overseas
                             else -> CdnMode.Mainland
                         },
-                    pinnedHost = Prefs.cdnOverrideHost,
+                    pinnedHost = if (Prefs.parallelDownloadEnabled) "" else Prefs.cdnOverrideHost,
                     visualizationEnabled = Prefs.showParallelDownloads,
+                    diagnosticsEnabled = Prefs.showDownloadDiagnostics,
                 )
             val options =
                 VideoPlayerOptions(

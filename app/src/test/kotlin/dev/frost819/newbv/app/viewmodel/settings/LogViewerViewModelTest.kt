@@ -1,6 +1,7 @@
 package dev.frost819.newbv.app.viewmodel.settings
 
 import android.app.Application
+import androidx.lifecycle.ViewModelStore
 import com.google.common.truth.Truth.assertThat
 import dev.frost819.newbv.app.network.HttpServer
 import dev.frost819.newbv.core.log.CrashHandler
@@ -180,8 +181,32 @@ class LogViewerViewModelTest {
     // ── server lifecycle ──────────────────────────────────────────────
 
     @Test
-    fun `onCleared stops httpServer`() {
-        httpServer.stop()
-        verify { httpServer.stop() }
+    fun `onCleared releases server without overriding capture choice`() {
+        val store = ViewModelStore()
+        store.put("logs", viewModel)
+        store.clear()
+        verify { httpServer.stopUnlessCapturing() }
+        verify(exactly = 0) { httpServer.stop() }
+    }
+
+    @Test
+    fun `capture toggle enables persistent server capture`() {
+        every { httpServer.isDownloadCaptureEnabled() } returns true
+        viewModel.setDownloadCapture(true)
+        Thread.sleep(300)
+        verify { httpServer.setDownloadCapture(true) }
+        assertThat(viewModel.uiState.value.downloadCapture).isTrue()
+        assertThat(viewModel.uiState.value.captureChanging).isFalse()
+    }
+
+    @Test
+    fun `capture start failure leaves switch off and shows error`() {
+        every { httpServer.setDownloadCapture(true) } throws IllegalStateException("bind failed")
+        every { httpServer.isDownloadCaptureEnabled() } returns false
+        viewModel.setDownloadCapture(true)
+        Thread.sleep(300)
+        assertThat(viewModel.uiState.value.downloadCapture).isFalse()
+        assertThat(viewModel.uiState.value.serverError).isNotNull()
+        assertThat(viewModel.uiState.value.captureChanging).isFalse()
     }
 }

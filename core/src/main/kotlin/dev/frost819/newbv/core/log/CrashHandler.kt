@@ -116,6 +116,13 @@ class CrashHandler(
             ?.sortedByDescending { it.lastModified() }
             ?: emptyList()
 
+    /** Lists saved buffering incidents, excluding incomplete atomic writes. */
+    fun listBufferingLogs(): List<File> =
+        File(context.filesDir, LOG_DIR)
+            .listFiles { it.name.startsWith("logs_buffering_") && it.extension == "log" }
+            ?.sortedByDescending { it.lastModified() }
+            ?: emptyList()
+
     /**
      * 列出所有手动日志文件。
      */

@@ -1,6 +1,7 @@
 package dev.frost819.newbv.player.impl.exo
 
 import android.content.Context
+import android.os.Handler
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -12,6 +13,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.hls.playlist.DefaultHlsPlaylistParserFactory
 import androidx.media3.exoplayer.hls.playlist.HlsMediaPlaylist
@@ -27,9 +29,11 @@ import androidx.media3.exoplayer.upstream.ParsingLoadable
 import dev.frost819.newbv.player.AbstractVideoPlayer
 import dev.frost819.newbv.player.OkHttpUtil
 import dev.frost819.newbv.player.VideoPlayerOptions
+import dev.frost819.newbv.player.download.DownloadMemoryReader
 import dev.frost819.newbv.player.download.DownloadMonitor
 import dev.frost819.newbv.player.download.DownloadSnapshot
 import dev.frost819.newbv.player.download.ParallelDownloadSession
+import dev.frost819.newbv.player.download.PlaybackMemorySampler
 import dev.frost819.newbv.player.download.VodPlaybackSource
 import dev.frost819.newbv.player.formatMinSec
 import kotlinx.coroutines.CoroutineScope
@@ -60,6 +64,7 @@ import java.util.Locale
 class ExoMediaPlayer(
     private val context: Context,
     private val options: VideoPlayerOptions,
+    private val traceStore: dev.frost819.newbv.player.download.DownloadTraceStore? = null,
 ) : AbstractVideoPlayer(),
     Player.Listener {
     companion object {
@@ -91,6 +96,30 @@ class ExoMediaPlayer(
     /** Stable flow across source, representation, and downloader session changes. */
     override val downloadSnapshot = _downloadSnapshot.asStateFlow()
 
+    private val measuredLoadControl = MeasuredLoadControl()
+    private val memoryTraceSession =
+        "player-" +
+            java.util.UUID
+                .randomUUID()
+                .toString()
+    private var memorySampler: PlaybackMemorySampler? = null
+
+    @Volatile private var memoryPlaybackFields: Map<String, Any?> = emptyMap()
+
+    @Volatile private var memorySurfaceSize: Pair<Int, Int>? = null
+
+    @Volatile private var videoDecoderName: String? = null
+
+    @Volatile private var audioDecoderName: String? = null
+    private var playbackSampleHandler: Handler? = null
+    private val playbackSampleTick =
+        object : Runnable {
+            override fun run() {
+                if (mPlayer == null) return
+                sampleDownloadPlayback()
+                playbackSampleHandler?.postDelayed(this, 250)
+            }
+        }
     private var downloadSession: ParallelDownloadSession? = null
     private var downloadMonitor: DownloadMonitor? = null
     private var downloadSnapshotJob: Job? = null
@@ -147,11 +176,79 @@ class ExoMediaPlayer(
             ExoPlayer
                 .Builder(context)
                 .setRenderersFactory(renderersFactory)
+                .setLoadControl(measuredLoadControl)
                 .setSeekForwardIncrementMs(1000 * 10)
                 .setSeekBackIncrementMs(1000 * 5)
                 .build()
 
         mPlayer?.addListener(this)
+        mPlayer?.addAnalyticsListener(
+            object : AnalyticsListener {
+                override fun onSurfaceSizeChanged(
+                    eventTime: AnalyticsListener.EventTime,
+                    width: Int,
+                    height: Int,
+                ) {
+                    memorySurfaceSize = width to height
+                }
+
+                override fun onVideoDecoderInitialized(
+                    eventTime: AnalyticsListener.EventTime,
+                    decoderName: String,
+                    initializedTimestampMs: Long,
+                    initializationDurationMs: Long,
+                ) {
+                    videoDecoderName = decoderName
+                }
+
+                override fun onAudioDecoderInitialized(
+                    eventTime: AnalyticsListener.EventTime,
+                    decoderName: String,
+                    initializedTimestampMs: Long,
+                    initializationDurationMs: Long,
+                ) {
+                    audioDecoderName = decoderName
+                }
+
+                override fun onVideoDecoderReleased(
+                    eventTime: AnalyticsListener.EventTime,
+                    decoderName: String,
+                ) {
+                    videoDecoderName =
+                        null
+                }
+
+                override fun onAudioDecoderReleased(
+                    eventTime: AnalyticsListener.EventTime,
+                    decoderName: String,
+                ) {
+                    audioDecoderName =
+                        null
+                }
+            },
+        )
+        memorySampler?.close()
+        if (traceStore != null) {
+            memorySampler =
+                PlaybackMemorySampler(
+                    context.applicationContext,
+                    downloadScope,
+                    enabled = { traceStore.enabled },
+                    record = { type, fields ->
+                        traceStore.record(
+                            memoryTraceSession,
+                            type,
+                            fields +
+                                mapOf(
+                                    "media3" to measuredLoadControl.memoryFields(),
+                                    "playback" to memoryPlaybackFields,
+                                    "videoDecoder" to videoDecoderName,
+                                    "audioDecoder" to audioDecoderName,
+                                ),
+                        )
+                    },
+                )
+        }
     }
 
     override fun setHeader(headers: Map<String, String>) {
@@ -190,8 +287,9 @@ class ExoMediaPlayer(
         vodSource = source
         streamProtocol = "DASH"
         val config = options.parallelDownload.copy(requestHeaders = requestHeaders)
-        val monitor = DownloadMonitor(config)
-        val session = ParallelDownloadSession(httpClient, config, source, monitor)
+        val monitor = DownloadMonitor(config, traceStore = traceStore)
+        val memoryReader = DownloadMemoryReader(context, measuredLoadControl::allocatedBytes)
+        val session = ParallelDownloadSession(httpClient, config, source, monitor, memoryReader::sample)
         downloadMonitor = monitor
         downloadSession = session
         downloadSnapshotJob =
@@ -214,7 +312,67 @@ class ExoMediaPlayer(
             }
     }
 
+    private var lastBufferingSampleMs = 0L
+
+    private fun sampleDownloadPlayback() {
+        val player = mPlayer ?: return
+        if (traceStore?.enabled == true) {
+            val format = player.videoFormat
+            memoryPlaybackFields =
+                mapOf(
+                    "sampleElapsedMs" to android.os.SystemClock.elapsedRealtime(),
+                    "positionMs" to player.currentPosition,
+                    "bufferedDurationMs" to player.totalBufferedDuration,
+                    "state" to player.playbackState,
+                    "playing" to player.isPlaying,
+                    "playWhenReady" to player.playWhenReady,
+                    "loading" to player.isLoading,
+                    "videoWidth" to format?.width,
+                    "videoHeight" to format?.height,
+                    "videoMime" to format?.sampleMimeType,
+                    "videoBitrate" to format?.bitrate,
+                    "videoFrameRate" to format?.frameRate,
+                    "surfaceWidth" to memorySurfaceSize?.first,
+                    "surfaceHeight" to memorySurfaceSize?.second,
+                    "colorTransfer" to format?.colorInfo?.colorTransfer,
+                    "softwareVideoRequested" to options.enableSoftwareVideoDecoder,
+                    "parallelEnabled" to options.parallelDownload.enabled,
+                    "downloadTraceSession" to downloadMonitor?.traceSessionId,
+                )
+        }
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (traceStore?.enabled == true && now - lastBufferingSampleMs >= 1000) {
+            lastBufferingSampleMs = now
+            traceStore.record(
+                downloadMonitor?.traceSessionId ?: "player",
+                "player_sample",
+                memoryPlaybackFields + ("media3" to measuredLoadControl.memoryFields()),
+            )
+        }
+        downloadMonitor?.updatePlayback(
+            positionMs = player.currentPosition,
+            speed = player.playbackParameters.speed,
+            playWhenReady = player.playWhenReady,
+            isPlaying = player.isPlaying,
+            isBuffering = player.playbackState == Player.STATE_BUFFERING,
+            bufferedPositionMs = player.bufferedPosition,
+            isReady = player.playbackState == Player.STATE_READY,
+            retainedBufferValid =
+                player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_BUFFERING,
+        )
+    }
+
+    override fun onEvents(
+        player: Player,
+        events: Player.Events,
+    ) {
+        // Media3 invokes this on its application looper, including seeks, pauses, and speed changes.
+        sampleDownloadPlayback()
+    }
+
     private fun closeDownloadSession() {
+        playbackSampleHandler?.removeCallbacks(playbackSampleTick)
+        playbackSampleHandler = null
         downloadSnapshotJob?.cancel()
         downloadSnapshotJob = null
         downloadSession?.close()
@@ -278,6 +436,12 @@ class ExoMediaPlayer(
         mMediaSource?.let {
             mPlayer?.setMediaSource(it)
             mPlayer?.prepare()
+            if (downloadMonitor != null || traceStore != null) {
+                playbackSampleHandler?.removeCallbacks(playbackSampleTick)
+                mPlayer?.let { player ->
+                    playbackSampleHandler = Handler(player.applicationLooper).also { it.post(playbackSampleTick) }
+                }
+            }
         }
     }
 
@@ -305,10 +469,15 @@ class ExoMediaPlayer(
         get() = mPlayer?.isPlaying == true
 
     override fun seekTo(time: Long) {
+        downloadMonitor?.clearPlayerBuffer()
+        downloadSession?.prepareSeek(time)
         mPlayer?.seekTo(time)
+        sampleDownloadPlayback()
     }
 
     override fun release() {
+        memorySampler?.close()
+        memorySampler = null
         closeDownloadSession()
         downloadScope.cancel()
         vodSource = null

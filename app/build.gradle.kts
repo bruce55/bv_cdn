@@ -60,6 +60,7 @@ android {
 
     buildTypes {
         release {
+            applicationIdSuffix = ".cdn"
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

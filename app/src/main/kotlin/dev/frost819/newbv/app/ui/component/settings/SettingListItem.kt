@@ -33,6 +33,7 @@ fun SettingListItem(
     supportText: String,
     onClick: () -> Unit,
     trailingContent: @Composable (() -> Unit)? = null,
+    enabled: Boolean = true,
 ) {
     var hasFocus by remember { mutableStateOf(false) }
 
@@ -42,11 +43,12 @@ fun SettingListItem(
                 .clip(RoundedCornerShape(12.dp))
                 .padding(horizontal = 12.dp)
                 .onFocusChanged { hasFocus = it.hasFocus }
-                .touchClickable(onClick = onClick),
+                .touchClickable(onClick = { if (enabled) onClick() }),
         headlineContent = { Text(text = title) },
         supportingContent = { Text(text = supportText) },
         trailingContent = trailingContent,
         onClick = onClick,
         selected = hasFocus,
+        enabled = enabled,
     )
 }

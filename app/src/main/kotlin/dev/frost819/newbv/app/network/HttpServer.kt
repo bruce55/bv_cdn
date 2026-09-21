@@ -2,6 +2,7 @@ package dev.frost819.newbv.app.network
 
 import dev.frost819.newbv.core.log.CrashHandler
 import dev.frost819.newbv.core.log.Loggers
+import dev.frost819.newbv.player.download.DownloadTraceStore
 import io.ktor.http.ContentDisposition
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -19,9 +20,14 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.io.File
 
 /**
@@ -36,15 +42,21 @@ import java.io.File
  * - `GET /api/logs/list` — 手动日志和崩溃日志文件列表 JSON
  * - `GET /api/logs/{filename}` — 下载指定日志文件
  * - `GET /api/logs/create-manual-and-download` — 创建手动日志并下载
+ * - `GET /api/download/events?after=N` — bounded playback scheduler events after exclusive cursor N
+ * - `GET /api/download/memory` — retained, redacted memory JSONL across process restarts
  *
  * @param assetProvider 资源读取函数，传入 assets 路径返回字节流，不存在返回 null。
  * @param logFileProvider 日志文件列表函数，返回所有可管理的日志文件。
  * @param manualLogCreator 手动日志创建函数，返回生成的文件，失败返回 null。
+ * @param downloadTraceStore Shared, opt-in process-local playback trace.
+ * @param memoryJournal Bounded persistent memory trace; read only while this LAN server is running.
  */
 class HttpServer(
     private val assetProvider: (String) -> ByteArray?,
     private val logFileProvider: () -> List<File>,
     private val manualLogCreator: () -> File?,
+    private val downloadTraceStore: DownloadTraceStore = DownloadTraceStore(),
+    private val memoryJournal: DownloadMemoryJournal? = null,
 ) {
     private val logger = Loggers.get("HttpServer")
 
@@ -60,36 +72,53 @@ class HttpServer(
      * 在随机端口（port = 0）上启动 CIO 引擎，非阻塞模式。
      * 重复调用安全（已运行时直接返回）。
      */
+    @Synchronized
     fun start() {
-        if (server != null) {
-            logger.warn { "HttpServer already running" }
-            return
+        if (server != null) return
+        val instance = embeddedServer(CIO, port = 0) { configureRoutes() }
+        try {
+            instance.start(wait = false)
+            val port =
+                runBlocking {
+                    instance.engine
+                        .resolvedConnectors()
+                        .first()
+                        .port
+                }
+            resolvedPort = port
+            server = instance
+            logger.info { "HttpServer started on port $port" }
+        } catch (error: Exception) {
+            runCatching { instance.stop(gracePeriodMillis = 0, timeoutMillis = 1000) }
+            resolvedPort = null
+            throw error
         }
-        server =
-            embeddedServer(CIO, port = 0) {
-                configureRoutes()
-            }.also { it.start(wait = false) }
-
-        // resolvedConnectors() 是 suspend 函数，用 runBlocking 同步获取端口
-        resolvedPort =
-            runBlocking {
-                server
-                    ?.engine
-                    ?.resolvedConnectors()
-                    ?.firstOrNull()
-                    ?.port
-            }
-        logger.info { "HttpServer started on port $resolvedPort" }
     }
 
-    /**
-     * 停止 HTTP 服务器。
-     */
+    /** Stops the server and capture, including when shutdown is explicitly requested. */
+    @Synchronized
     fun stop() {
-        server?.stop(gracePeriodMillis = 1000, timeoutMillis = 2000)
+        downloadTraceStore.setEnabled(false)
+        val previous = server
         server = null
         resolvedPort = null
-        logger.info { "HttpServer stopped" }
+        previous?.stop(gracePeriodMillis = 1000, timeoutMillis = 2000)
+    }
+
+    /** Enables capture for this process and keeps the server alive after leaving settings. */
+    @Synchronized
+    fun setDownloadCapture(enabled: Boolean) {
+        if (enabled) start()
+        downloadTraceStore.setEnabled(enabled)
+    }
+
+    /** Whether playback capture is enabled (not persisted across application restarts). */
+    fun isDownloadCaptureEnabled(): Boolean = downloadTraceStore.liveCaptureEnabled
+
+    /** Releases the settings page's server use without interrupting opted-in playback capture. */
+    @Synchronized
+    fun stopUnlessCapturing() {
+        if (!downloadTraceStore.liveCaptureEnabled) stop()
     }
 
     /** 服务器是否正在运行。 */
@@ -109,6 +138,7 @@ class HttpServer(
             homeRoute()
             staticAssetsRoute()
             logsApiRoute()
+            downloadApiRoute()
         }
     }
 
@@ -210,6 +240,56 @@ class HttpServer(
         }
     }
 
+    private fun Route.downloadApiRoute() {
+        get("/api/download/memory") {
+            val body = withContext(Dispatchers.IO) { memoryJournal?.read().orEmpty() }
+            call.response.header(HttpHeaders.CacheControl, "no-store")
+            call.response.header("X-Memory-Journal-Dropped", (memoryJournal?.droppedWrites ?: 0).toString())
+            call.response.header(HttpHeaders.ContentDisposition, "attachment; filename=download-memory.jsonl")
+            call.respondText(body, ContentType.parse("application/x-ndjson"))
+        }
+        get("/api/download/events") {
+            val rawAfter = call.request.queryParameters["after"]
+            val after = rawAfter?.toLongOrNull() ?: 0L
+            if (after < 0 || (rawAfter != null && rawAfter.toLongOrNull() == null)) {
+                return@get call.respondText("invalid cursor", status = HttpStatusCode.BadRequest)
+            }
+            val snapshot = downloadTraceStore.snapshot(after)
+            val body =
+                buildJsonObject {
+                    put("enabled", snapshot.enabled)
+                    put("oldestSequence", snapshot.oldestSequence)
+                    put("nextSequence", snapshot.nextSequence)
+                    put(
+                        "events",
+                        buildJsonArray {
+                            snapshot.events.forEach { event ->
+                                add(
+                                    buildJsonObject {
+                                        put("sequence", event.sequence)
+                                        put("timeMs", event.timeMs)
+                                        put("session", event.session)
+                                        put("type", event.type)
+                                        put(
+                                            "fields",
+                                            buildJsonObject {
+                                                event.fields.forEach { (key, value) -> put(key, value) }
+                                            },
+                                        )
+                                    },
+                                )
+                            }
+                        },
+                    )
+                }
+            call.response.header(HttpHeaders.CacheControl, "no-store")
+            if (call.request.queryParameters["download"] == "1") {
+                call.response.header(HttpHeaders.ContentDisposition, "attachment; filename=download-trace.json")
+            }
+            call.respondText(body.toString(), ContentType.Application.Json)
+        }
+    }
+
     // ── 辅助方法 ──────────────────────────────────────────────────────
 
     /**
@@ -233,6 +313,7 @@ class HttpServer(
             when {
                 name.startsWith(CrashHandler.MANUAL_LOG_PREFIX) -> "manual"
                 name.startsWith(CrashHandler.CRASH_LOG_PREFIX) -> "crash"
+                name.startsWith("logs_buffering_") -> "buffering"
                 else -> "unknown"
             }
         return LogItem(name = name, size = length(), lastModified = lastModified(), type = type)
@@ -246,7 +327,8 @@ class HttpServer(
     private fun isAllowedLogFilename(filename: String): Boolean {
         val allowedPrefix =
             filename.startsWith(CrashHandler.MANUAL_LOG_PREFIX) ||
-                filename.startsWith(CrashHandler.CRASH_LOG_PREFIX)
+                filename.startsWith(CrashHandler.CRASH_LOG_PREFIX) ||
+                filename.startsWith("logs_buffering_")
         val allowedSuffix = filename.endsWith(".log")
         return allowedPrefix && allowedSuffix
     }

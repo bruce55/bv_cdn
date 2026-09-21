@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>播放下载日志 · newBV</title>
+<style>
+:root{color-scheme:dark;font:15px system-ui;background:#10151b;color:#e1e8ef}body{max-width:1400px;margin:auto;padding:24px}header{display:flex;gap:16px;align-items:center;flex-wrap:wrap}h1{font-size:24px;margin:0 auto 0 0}a{color:#63d6ff}button,input,select{font:inherit;padding:8px;border:1px solid #516174;border-radius:6px;background:#1c2734;color:inherit}#status{margin:20px 0;color:#90c8a9}#events{display:grid;gap:6px}.event{border-left:3px solid #5ccde3;padding:10px 14px;background:#18212c}.meta{display:flex;gap:16px;flex-wrap:wrap;color:#94a9bc}.type{color:#72d3ed;font-weight:600}pre{margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:12px ui-monospace,monospace}#filter{min-width:220px}nav{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:20px 0}small{color:#a5b2c0}
+</style>
+</head>
+<body>
+<header><h1>播放下载日志</h1><a href="/">应用日志</a><a href="/api/download/events?download=1">下载设备记录</a><a href="/api/download/memory">下载内存记录（含上次运行）</a><button id="save">保存浏览器记录</button></header>
+<nav><input id="filter" placeholder="筛选 CDN / 事件 / 轨道" aria-label="筛选日志"><button id="pause">暂停刷新</button><small>最新 200 条 · 浏览器最多保留 1000 条 / 2 MiB 字符</small></nav>
+<p id="status" role="status">连接中…</p><div id="events"></div>
+<script>
+'use strict';
+let cursor=0, events=[], size=0, paused=false, dropped=0;
+const status=document.querySelector('#status'), root=document.querySelector('#events'), filter=document.querySelector('#filter');
+function render(){
+  const query=filter.value.toLowerCase();
+  const visible=events.filter(e=>!query||e.text.toLowerCase().includes(query)).slice(-200).reverse();
+  const fragment=document.createDocumentFragment();
+  for(const entry of visible){
+    const e=entry.value, box=document.createElement('section'), meta=document.createElement('div');box.className='event';meta.className='meta';
+    for(const [text,cls] of [[e.type,'type'],[new Date(e.timeMs).toLocaleTimeString(),''],['#'+e.sequence+' · '+e.session,'']]){
+      const span=document.createElement('span');span.className=cls;span.textContent=text;meta.append(span);
+    }
+    const detail=document.createElement('pre');detail.textContent=JSON.stringify(e.fields,null,2);box.append(meta,detail);fragment.append(box);
+  }
+  root.replaceChildren(fragment);
+}
+async function poll(){
+  if(paused){setTimeout(poll,1000);return;}
+  const controller=new AbortController(), timeout=setTimeout(()=>controller.abort(),8000);
+  try{
+    const response=await fetch('/api/download/events?after='+cursor,{cache:'no-store',signal:controller.signal});
+    if(!response.ok)throw Error('HTTP '+response.status);
+    const data=await response.json();
+    if(data.nextSequence<=cursor){events=[];size=0;cursor=0;dropped=0;}
+    if(cursor && data.oldestSequence>cursor+1)dropped+=data.oldestSequence-cursor-1;
+    for(const e of data.events){if(e.sequence<=cursor)continue;const text=JSON.stringify(e);events.push({value:e,text});size+=text.length;cursor=e.sequence;}
+    while(events.length>1000||size>1048576)size-=events.shift().text.length;
+    status.textContent=(data.enabled?'● 正在记录':'○ 未启用：在电视「日志管理」打开「播放下载日志」')+' · '+events.length+' 条'+(dropped?' · 设备已覆盖 '+dropped+' 条旧记录':'');
+    render();
+  }catch(error){status.textContent='连接中断 · '+error.message+' · 自动重试';}
+  finally{clearTimeout(timeout);setTimeout(poll,1000);}
+}
+filter.addEventListener('input',render);
+document.querySelector('#pause').onclick=function(){paused=!paused;this.textContent=paused?'继续刷新':'暂停刷新';};
+document.querySelector('#save').onclick=()=>{
+  const url=URL.createObjectURL(new Blob([JSON.stringify(events.map(e=>e.value),null,2)],{type:'application/json'}));
+  const link=document.createElement('a');link.href=url;link.download='newbv-download-trace.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
+poll();
+</script>
+</body>
+</html>

@@ -41,6 +41,39 @@ class RangeResponseTest {
     }
 
     @Test
+    fun `proven route stays preferred across chunks and audio representation`() {
+        val original = "https://upos-sz-mirrorcosov.bilivideo.com/video?sig=v"
+        val resolver = CdnResolver(ParallelDownloadConfig(mode = CdnMode.Overseas))
+        resolver.success(original, 262144, 100_000_000)
+        repeat(12) {
+            assertEquals(
+                original,
+                resolver.candidates(MediaTrackSource("v", DownloadTrack.Video, listOf(original))).first(),
+            )
+        }
+        val audio = original.replace("video?sig=v", "audio?sig=a")
+        assertEquals(audio, resolver.candidates(MediaTrackSource("a", DownloadTrack.Audio, listOf(audio))).first())
+        resolver.failure(original)
+        kotlin.test.assertNotEquals(
+            audio,
+            resolver.candidates(MediaTrackSource("a", DownloadTrack.Audio, listOf(audio))).first(),
+        )
+    }
+
+    @Test
+    fun `API and peer CDN paths are never used as synthetic donors`() {
+        listOf("api.bilivideo.com", "data.bilivideo.com", "mcdn.bilivideo.com").forEach { host ->
+            val original = "https://$host/path?sig=x"
+            assertEquals(
+                listOf(original),
+                CdnResolver(
+                    ParallelDownloadConfig(),
+                ).candidates(MediaTrackSource("v", DownloadTrack.Video, listOf(original))),
+            )
+        }
+    }
+
+    @Test
     fun `akamai representation is never rewritten`() {
         val original = "https://example.akamaized.net/v.m4s?sig=x"
         val track = MediaTrackSource("v", DownloadTrack.Video, listOf(original))

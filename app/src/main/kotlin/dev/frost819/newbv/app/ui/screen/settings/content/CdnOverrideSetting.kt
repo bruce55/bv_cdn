@@ -25,6 +25,13 @@ fun CdnOverrideSetting() {
     var customInput by rememberSaveable { mutableStateOf("") }
     var accelerated by rememberSaveable { mutableStateOf(Prefs.parallelDownloadEnabled) }
     var visualization by rememberSaveable { mutableStateOf(Prefs.showParallelDownloads) }
+    var progressSize by rememberSaveable { mutableStateOf(Prefs.downloadProgressSize) }
+    var showProgressSize by rememberSaveable { mutableStateOf(false) }
+    var diagnostics by rememberSaveable { mutableStateOf(Prefs.showDownloadDiagnostics) }
+    var chart by rememberSaveable { mutableStateOf(Prefs.showDownloadChart) }
+    var keepVisible by rememberSaveable { mutableStateOf(Prefs.keepDownloadControlsVisible) }
+    var minimumBlock by rememberSaveable { mutableStateOf(Prefs.minimumDownloadBlockKiB) }
+    var showMinimumBlock by rememberSaveable { mutableStateOf(false) }
     var requestLimit by rememberSaveable { mutableStateOf(Prefs.parallelDownloadRequests) }
     var mode by rememberSaveable { mutableStateOf(Prefs.parallelDownloadMode) }
     var showMode by rememberSaveable { mutableStateOf(false) }
@@ -47,14 +54,65 @@ fun CdnOverrideSetting() {
     )
     SettingSwitchListItem(
         title = "显示下载分块",
-        supportText = "下次加载生效。加速开启时显示视频/音频分块与活跃下载数；空框待下载，蓝色下载中，绿色完成，橙色重试",
+        supportText = "下次加载生效。显示视频/音频下载进度与并发数；分块填色表示已接收，底部短线记录下载事件",
         checked = visualization,
         onCheckedChange = {
             visualization = it
             Prefs.showParallelDownloads = it
         },
     )
+    SettingListItem(
+        title = "下载进度显示大小",
+        supportText = progressSizeLabel(progressSize),
+        enabled = visualization,
+        onClick = { showProgressSize = true },
+    )
+    if (showProgressSize) {
+        OptionDialog(
+            options = arrayOf("compact", "normal", "large", "extra_large"),
+            selectedOption = progressSize,
+            onDismiss = { showProgressSize = false },
+            onSelect = {
+                progressSize = it
+                Prefs.downloadProgressSize = it
+            },
+            getDisplayName = ::progressSizeLabel,
+        )
+    }
+    SettingSwitchListItem(
+        title = "显示 CDN 下载诊断",
+        supportText = "下次加载生效。加速开启时，按遥控器下键或轻触画面，在播放控制栏查看节点使用、测速和失败情况",
+        checked = diagnostics,
+        onCheckedChange = {
+            diagnostics = it
+            Prefs.showDownloadDiagnostics = it
+        },
+    )
+    SettingSwitchListItem(
+        title = "显示下载调试曲线",
+        supportText = "需开启 CDN 诊断；每秒采样，保留最近 120 点，显示速率、缓冲、并发和分段大小",
+        checked = chart,
+        enabled = diagnostics,
+        onCheckedChange = {
+            chart = it
+            Prefs.showDownloadChart = it
+        },
+    )
+    SettingSwitchListItem(
+        title = "下载调试：保持播放控制栏显示",
+        supportText = "进入播放器自动显示；不自动隐藏，返回键仍可收起",
+        checked = keepVisible,
+        onCheckedChange = {
+            keepVisible = it
+            Prefs.keepDownloadControlsVisible = it
+        },
+    )
     if (accelerated) {
+        SettingListItem(
+            title = "最小下载块",
+            supportText = "${blockSizeLabel(minimumBlock)} · 下次加载生效；短分段及启动探测除外",
+            onClick = { showMinimumBlock = true },
+        )
         SettingListItem(
             title = "最大并发下载数",
             supportText = "$requestLimit（视频、音频和重试共用，下次加载生效）",
@@ -64,11 +122,22 @@ fun CdnOverrideSetting() {
             title = "自动 CDN 范围",
             supportText =
                 when {
-                    host.isNotEmpty() -> "已固定节点：$host（自动选择不生效）"
                     mode == "overseas" -> "海外（下次加载生效）"
                     else -> "中国大陆（下次加载生效）"
                 },
             onClick = { showMode = true },
+        )
+    }
+    if (showMinimumBlock) {
+        OptionDialog(
+            options = arrayOf(64, 256, 512, 1024, 2048, 4096),
+            selectedOption = minimumBlock,
+            onDismiss = { showMinimumBlock = false },
+            onSelect = {
+                minimumBlock = it
+                Prefs.minimumDownloadBlockKiB = it
+            },
+            getDisplayName = ::blockSizeLabel,
         )
     }
     if (showMode) {
@@ -85,7 +154,7 @@ fun CdnOverrideSetting() {
     }
     if (showRequests) {
         OptionDialog(
-            options = arrayOf(4, 8),
+            options = arrayOf(4, 8, 12, 16, 24, 32, 48, 64),
             selectedOption = requestLimit,
             onDismiss = { showRequests = false },
             onSelect = {
@@ -97,13 +166,15 @@ fun CdnOverrideSetting() {
     }
     SettingListItem(
         title = "手动固定 CDN 节点",
-        supportText = "当前：$region（固定节点优先于自动选择；选择默认恢复自动，下次加载生效）",
+        supportText = if (accelerated) "并行下载开启时自动选择 CDN" else "当前：$region（下次加载生效）",
+        enabled = !accelerated,
         onClick = { showRegions = true },
     )
     if (host.isNotEmpty()) {
         SettingListItem(
             title = if (nodes.isEmpty()) "自定义播放源" else "播放源节点",
             supportText = host,
+            enabled = !accelerated,
             onClick = {
                 if (nodes.isEmpty()) {
                     customInput = host
@@ -114,7 +185,7 @@ fun CdnOverrideSetting() {
             },
         )
     }
-    if (showRegions) {
+    if (showRegions && !accelerated) {
         OptionDialog(
             options = CdnOverrideCatalog.regions.toTypedArray(),
             selectedOption = region,
@@ -132,7 +203,7 @@ fun CdnOverrideSetting() {
             getDisplayName = { it },
         )
     }
-    if (showNodes && nodes.isNotEmpty()) {
+    if (showNodes && nodes.isNotEmpty() && !accelerated) {
         OptionDialog(
             options = nodes.toTypedArray(),
             selectedOption = host,
@@ -141,7 +212,7 @@ fun CdnOverrideSetting() {
             getDisplayName = { it },
         )
     }
-    if (showCustom) {
+    if (showCustom && !accelerated) {
         val normalized = CdnOverrideCatalog.normalizeHost(customInput)
         AlertDialog(
             onDismissRequest = { showCustom = false },
@@ -170,3 +241,17 @@ fun CdnOverrideSetting() {
         )
     }
 }
+
+private fun blockSizeLabel(kib: Int): String =
+    when {
+        kib < 1024 -> "$kib KiB"
+        else -> "${kib / 1024} MiB"
+    }
+
+private fun progressSizeLabel(size: String): String =
+    when (size) {
+        "compact" -> "紧凑"
+        "large" -> "大"
+        "extra_large" -> "特大"
+        else -> "标准"
+    }

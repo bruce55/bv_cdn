@@ -3,9 +3,15 @@ package dev.frost819.newbv.app.ui.component.player
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -13,6 +19,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,6 +36,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import dev.frost819.newbv.app.entity.player.VideoAspectRatio
 import dev.frost819.newbv.app.entity.player.VideoListItem
@@ -69,6 +77,7 @@ import kotlinx.coroutines.launch
  * 8. MenuController — 设置菜单
  *
  * @param downloadSnapshot Optional download lanes/count, shared by expanded and persistent progress bars.
+ * @param diagnosticsSnapshot Optional host diagnostics shown with the playback controls.
  */
 @Composable
 @Suppress("LongParameterList", "CyclomaticComplexMethod")
@@ -80,6 +89,7 @@ fun VideoPlayerController(
     uiState: PlayerUiState,
     seekerState: State<SeekerState>,
     downloadSnapshot: DownloadSnapshot? = null,
+    diagnosticsSnapshot: DownloadSnapshot? = null,
     onPlay: () -> Unit,
     onPause: () -> Unit,
     onExit: () -> Unit,
@@ -109,10 +119,14 @@ fun VideoPlayerController(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    var infoTopHeight by remember { mutableIntStateOf(0) }
+    var infoBottomHeight by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+
     // 覆盖层可见性
     var showListController by remember { mutableStateOf(false) }
     var showMenuController by remember { mutableStateOf(false) }
-    var showInfoSeekController by remember { mutableStateOf(false) }
+    var showInfoSeekController by remember { mutableStateOf(Prefs.keepDownloadControlsVisible) }
     var showRelatedVideosController by remember { mutableStateOf(false) }
     val showClickableControllers by remember {
         derivedStateOf {
@@ -171,7 +185,7 @@ fun VideoPlayerController(
                 onGoTime(goTime)
                 if (uiState.playerState != PlayerState.Playing) onPlay()
                 isSeeking = false
-                showInfoSeekController = false
+                if (!Prefs.keepDownloadControlsVisible) showInfoSeekController = false
             }
     }
 
@@ -192,14 +206,14 @@ fun VideoPlayerController(
         onGoTime(goTime)
         if (uiState.playerState != PlayerState.Playing) onPlay()
         isSeeking = false
-        showInfoSeekController = false
+        if (!Prefs.keepDownloadControlsVisible) showInfoSeekController = false
     }
 
     /**
      * 控制器自动隐藏计时器。触屏交互后 5 秒无操作自动收起控制器。
      */
     fun startControllerAutoHide() {
-        if (!showInfoSeekController) return
+        if (!showInfoSeekController || Prefs.keepDownloadControlsVisible) return
         hideInfoSeekCountdown?.cancel()
         hideInfoSeekCountdown =
             scope.launch {
@@ -397,7 +411,7 @@ fun VideoPlayerController(
         return false
     }
 
-    Box(
+    BoxWithConstraints(
         modifier =
             modifier
                 .background(Color.Black)
@@ -544,6 +558,53 @@ fun VideoPlayerController(
             onVideoClicked = onRelatedVideoClicked,
         )
 
+        if (diagnosticsSnapshot != null && showInfoSeekController && !showMenuController && !showListController) {
+            val top = with(density) { infoTopHeight.toDp() }
+            val bottom = with(density) { infoBottomHeight.toDp() }
+            val availableHeight = (maxHeight - top - bottom - 16.dp).coerceAtLeast(0.dp)
+            val availableWidth = (maxWidth - 48.dp).coerceAtLeast(0.dp)
+            val panelWidth =
+                if (Prefs.showDownloadChart) {
+                    minOf(350.dp, (availableWidth - 12.dp).coerceAtLeast(0.dp) / 2)
+                } else {
+                    minOf(350.dp, availableWidth)
+                }
+            if (availableHeight > 0.dp && panelWidth > 0.dp && infoTopHeight > 0 && infoBottomHeight > 0) {
+                // Keep diagnostics inside the measured free area, including large progress lanes
+                // and seek previews. Fit each complete panel instead of clipping its lower rows.
+                Box(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .offset(y = top + 8.dp)
+                        .width(availableWidth)
+                        .height(availableHeight),
+                ) {
+                    if (Prefs.showDownloadChart) {
+                        FittedDiagnosticPanel(
+                            modifier =
+                                Modifier
+                                    .align(
+                                        Alignment.CenterStart,
+                                    ).widthIn(max = panelWidth)
+                                    .heightIn(max = availableHeight),
+                        ) {
+                            DownloadDebugChart(snapshot = diagnosticsSnapshot)
+                        }
+                    }
+                    FittedDiagnosticPanel(
+                        modifier =
+                            Modifier
+                                .align(
+                                    Alignment.CenterEnd,
+                                ).widthIn(max = panelWidth)
+                                .heightIn(max = availableHeight),
+                    ) {
+                        DownloadDiagnosticsPanel(snapshot = diagnosticsSnapshot)
+                    }
+                }
+            }
+        }
+
         // 信息栏 + 进度条 + 按钮
         ControllerVideoInfo(
             modifier = Modifier.focusable(),
@@ -582,6 +643,8 @@ fun VideoPlayerController(
             onGoToUpPage = onGoToUpPage,
             onShowInteraction = onShowInteraction,
             onShowComments = onShowComments,
+            onTopHeightChanged = { infoTopHeight = it },
+            onBottomHeightChanged = { infoBottomHeight = it },
         )
 
         // 分集列表

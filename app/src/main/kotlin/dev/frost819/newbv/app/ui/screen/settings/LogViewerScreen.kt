@@ -41,6 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.ListItem
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import dev.frost819.newbv.app.ui.component.settings.SettingSwitchListItem
 import dev.frost819.newbv.app.viewmodel.settings.LogViewerViewModel
 import dev.frost819.newbv.core.focus.touchClickable
 import io.github.g0dkar.qrcode.QRCode
@@ -77,8 +78,8 @@ fun LogViewerScreen(
         runCatching { focusRequester.requestFocus() }
     }
 
-    LaunchedEffect(selectedFile, isCreateFocused, uiState.serverAddress) {
-        if (uiState.serverAddress.isEmpty()) {
+    LaunchedEffect(selectedFile, isCreateFocused, uiState.serverAddress, uiState.isServerReady) {
+        if (!uiState.isServerReady) {
             qrImage = null
             return@LaunchedEffect
         }
@@ -142,6 +143,23 @@ fun LogViewerScreen(
                         )
                     }
 
+                    item {
+                        SettingSwitchListItem(
+                            title = "播放下载日志",
+                            supportText = "返回播放后继续记录。关闭或退出应用后停止。",
+                            checked = uiState.downloadCapture,
+                            enabled = !uiState.captureChanging,
+                            onCheckedChange = viewModel::setDownloadCapture,
+                            modifier =
+                                Modifier.onFocusChanged {
+                                    if (it.hasFocus) {
+                                        isCreateFocused = true
+                                        selectedFile = null
+                                    }
+                                },
+                        )
+                    }
+
                     items(items = uiState.logFiles, key = { it.name }) { file ->
                         ListItem(
                             modifier =
@@ -197,7 +215,7 @@ fun LogViewerScreen(
                 ) {
                     Text(
                         modifier = Modifier.padding(16.dp),
-                        text = "浏览器打开 ${uiState.serverAddress}\n或扫码进入日志管理",
+                        text = uiState.serverError ?: "浏览器打开 ${uiState.serverAddress}\n或扫码进入日志管理",
                         fontSize = 20.sp,
                         textAlign = TextAlign.Center,
                     )
@@ -220,8 +238,10 @@ fun LogViewerScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                if (isCreateFocused) Text(text = "正在获取端口……")
-                                CircularProgressIndicator()
+                                if (uiState.serverError == null) {
+                                    if (isCreateFocused) Text(text = "正在获取端口……")
+                                    CircularProgressIndicator()
+                                }
                             }
                         }
                     }

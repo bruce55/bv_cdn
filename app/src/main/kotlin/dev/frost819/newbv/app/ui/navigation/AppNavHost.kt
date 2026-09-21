@@ -2,6 +2,13 @@ package dev.frost819.newbv.app.ui.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.rememberNavController
@@ -36,6 +43,7 @@ fun AppNavHost(
     startDestination: Any = HomeRoute,
 ) {
     val logger = Loggers.get("AppNavHost")
+    val remoteBackGuard = remember { RemoteBackKeyGuard() }
 
     LaunchedEffect(navController) {
         var previousRoute: String? = null
@@ -48,7 +56,22 @@ fun AppNavHost(
         }
     }
 
+    // The TV player can pop on key-down. Its key-up then belongs to the old screen;
+    // letting it reach system Back can ask NavHost to transition an already removed entry.
     NavHost(
+        modifier =
+            Modifier.onPreviewKeyEvent { event ->
+                if (event.key != Key.Back) return@onPreviewKeyEvent false
+                val entryId = navController.currentBackStackEntry?.id
+                when (event.type) {
+                    KeyEventType.KeyDown -> {
+                        remoteBackGuard.onDown(entryId)
+                        false
+                    }
+                    KeyEventType.KeyUp -> remoteBackGuard.consumeUp(entryId)
+                    else -> false
+                }
+            },
         navController = navController,
         startDestination = startDestination,
     ) {

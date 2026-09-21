@@ -41,6 +41,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -63,6 +64,7 @@ import dev.frost819.newbv.app.util.formatHourMinSec
 import dev.frost819.newbv.biliapi.entity.video.VideoShot
 import dev.frost819.newbv.core.focus.touchClickable
 import dev.frost819.newbv.core.theme.BVTheme
+import dev.frost819.newbv.data.datastore.Prefs
 import dev.frost819.newbv.player.download.DownloadSnapshot
 import kotlinx.coroutines.delay
 
@@ -99,6 +101,8 @@ import kotlinx.coroutines.delay
  * @param onGoToUpPage 跳转 UP 主页面回调
  * @param onShowInteraction 打开视频交互弹窗回调
  * @param onShowComments 打开评论弹窗回调
+ * @param onTopHeightChanged Reports the measured title area for adjacent overlays.
+ * @param onBottomHeightChanged Reports the measured progress and control area for adjacent overlays.
  */
 @Composable
 fun ControllerVideoInfo(
@@ -129,10 +133,12 @@ fun ControllerVideoInfo(
     onGoToUpPage: () -> Unit,
     onShowInteraction: () -> Unit,
     onShowComments: () -> Unit,
+    onTopHeightChanged: (Int) -> Unit = {},
+    onBottomHeightChanged: (Int) -> Unit = {},
 ) {
     Box(modifier = modifier.fillMaxSize()) {
         AnimatedVisibility(
-            modifier = Modifier.align(Alignment.TopCenter),
+            modifier = Modifier.align(Alignment.TopCenter).onSizeChanged { onTopHeightChanged(it.height) },
             visible = show,
             enter = expandVertically(),
             exit = shrinkVertically(),
@@ -146,7 +152,7 @@ fun ControllerVideoInfo(
             )
         }
         AnimatedVisibility(
-            modifier = Modifier.align(Alignment.BottomCenter),
+            modifier = Modifier.align(Alignment.BottomCenter).onSizeChanged { onBottomHeightChanged(it.height) },
             visible = show,
             enter = expandVertically(),
             exit = shrinkVertically(),
@@ -341,8 +347,20 @@ fun ControllerVideoInfoBottom(
         Row(
             modifier =
                 Modifier
-                    .padding(horizontal = 24.dp)
-                    .border(
+                    // Keep the scaled icons inside the screen's existing safe margin.
+                    // Padding precedes pointerInput so touch coordinates still cover only the bar.
+                    .padding(
+                        start =
+                            24.dp +
+                                if (downloadSnapshot !=
+                                    null
+                                ) {
+                                    20.dp * downloadProgressScale(Prefs.downloadProgressSize)
+                                } else {
+                                    0.dp
+                                },
+                        end = 24.dp,
+                    ).border(
                         width = 1.dp,
                         color = Color.White.copy(alpha = if (isSeekFocused) 1f else 0f),
                         shape =

@@ -1,9 +1,10 @@
 package dev.frost819.newbv.app.ui.component.player
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.SliderColors
 import androidx.compose.material3.SliderDefaults
@@ -15,6 +16,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.frost819.newbv.core.theme.BVTheme
+import dev.frost819.newbv.data.datastore.Prefs
 import dev.frost819.newbv.player.download.DownloadSnapshot
 
 /**
@@ -43,53 +45,103 @@ fun VideoProgressSeek(
     isPersistentSeek: Boolean,
     downloadSnapshot: DownloadSnapshot? = null,
 ) {
-    val colors: SliderColors = SliderDefaults.colors()
     val trackWidthDp = if (isPersistentSeek) 2.dp else 8.dp
 
-    Column(modifier = modifier.fillMaxWidth()) {
-        if (downloadSnapshot != null) {
-            DownloadBlockLanes(snapshot = downloadSnapshot, duration = duration)
+    val displayScale = if (downloadSnapshot == null) 1f else downloadProgressScale(Prefs.downloadProgressSize)
+    // Persistent bars have no enclosing controller padding. Preserve the screen-safe
+    // margin outside the icon gutter at every user-selected display scale.
+    val margin = if (downloadSnapshot != null && isPersistentSeek) 24.dp + 20.dp * displayScale else 0.dp
+    val frameModifier = modifier.fillMaxWidth().padding(horizontal = margin)
+    if (downloadSnapshot != null) {
+        Box(frameModifier.height(24.dp * displayScale + trackWidthDp)) {
+            DownloadBlockLanes(
+                snapshot = downloadSnapshot,
+                duration = duration,
+                displayScale = displayScale,
+                middleGap = trackWidthDp,
+            )
+            PlaybackProgressLine(
+                duration = duration,
+                position = position,
+                bufferedPercentage = bufferedPercentage,
+                isPersistentSeek = isPersistentSeek,
+                showBuffered = false,
+                modifier = Modifier.padding(top = 15.dp * displayScale),
+            )
         }
-        Canvas(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .height(trackWidthDp)
-                    .clip(RoundedCornerShape(50)),
-        ) {
-            val trackWidthPx = trackWidthDp.toPx()
+    } else {
+        PlaybackProgressLine(
+            duration = duration,
+            position = position,
+            bufferedPercentage = bufferedPercentage,
+            isPersistentSeek = isPersistentSeek,
+            showBuffered = !isPersistentSeek,
+            modifier = frameModifier,
+        )
+    }
+}
 
-            // 背景轨道
+/** Shared lane scale keeps controller icon gutters aligned with the actual rendering. */
+internal fun downloadProgressScale(size: String): Float =
+    when (size) {
+        "compact" -> 1f
+        "large" -> 2f
+        "extra_large" -> 3f
+        else -> 1.5f
+    }
+
+@Composable
+private fun PlaybackProgressLine(
+    duration: Long,
+    position: Long,
+    bufferedPercentage: Int,
+    isPersistentSeek: Boolean,
+    showBuffered: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val colors: SliderColors = SliderDefaults.colors()
+    val trackWidthDp = if (isPersistentSeek) 2.dp else 8.dp
+    Canvas(
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .height(trackWidthDp)
+                .clip(RoundedCornerShape(50)),
+    ) {
+        val trackWidthPx = trackWidthDp.toPx()
+
+        // 背景轨道
+        drawLine(
+            color = colors.inactiveTrackColor,
+            start = Offset(0f, center.y),
+            end = Offset(size.width, center.y),
+            strokeWidth = trackWidthPx,
+            cap = StrokeCap.Round,
+        )
+
+        // 缓冲进度（仅交互模式显示）
+        // The download lanes show actual local intervals; a zero-to-buffered overlay
+        // would falsely fill holes and discarded history after seeking.
+        if (showBuffered && bufferedPercentage > 0) {
             drawLine(
-                color = colors.inactiveTrackColor,
-                start = Offset(0f, center.y),
-                end = Offset(size.width, center.y),
+                color = colors.disabledActiveTrackColor,
+                start = Offset(trackWidthPx / 2, center.y),
+                end = Offset(size.width * bufferedPercentage / 100, center.y),
                 strokeWidth = trackWidthPx,
                 cap = StrokeCap.Round,
             )
+        }
 
-            // 缓冲进度（仅交互模式显示）
-            if (!isPersistentSeek && bufferedPercentage > 0) {
-                drawLine(
-                    color = colors.disabledActiveTrackColor,
-                    start = Offset(trackWidthPx / 2, center.y),
-                    end = Offset(size.width * bufferedPercentage / 100, center.y),
-                    strokeWidth = trackWidthPx,
-                    cap = StrokeCap.Round,
-                )
-            }
-
-            // 播放进度
-            if (duration > 0) {
-                val progressRatio = (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
-                drawLine(
-                    color = colors.activeTrackColor,
-                    start = Offset(trackWidthPx / 2, center.y),
-                    end = Offset(size.width * progressRatio, center.y),
-                    strokeWidth = trackWidthPx,
-                    cap = StrokeCap.Round,
-                )
-            }
+        // 播放进度
+        if (duration > 0) {
+            val progressRatio = (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+            drawLine(
+                color = colors.activeTrackColor,
+                start = Offset(trackWidthPx / 2, center.y),
+                end = Offset(size.width * progressRatio, center.y),
+                strokeWidth = trackWidthPx,
+                cap = StrokeCap.Round,
+            )
         }
     }
 }

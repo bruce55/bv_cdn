@@ -50,8 +50,11 @@ import dev.frost819.newbv.danmaku.util.calculateMaskDelay
 import dev.frost819.newbv.danmaku.util.danmakuMask
 import dev.frost819.newbv.data.datastore.Prefs
 import dev.frost819.newbv.player.BvVideoPlayer
+import dev.frost819.newbv.player.download.DownloadSnapshot
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.isActive
 import kotlin.math.absoluteValue
 
@@ -62,6 +65,7 @@ import kotlin.math.absoluteValue
  * 管理播放器生命周期、心跳、弹幕蒙版更新循环。
  */
 @Composable
+@OptIn(FlowPreview::class)
 fun VideoPlayerScreen(
     navController: NavController,
     playerViewModel: PlayerViewModel = hiltViewModel(),
@@ -79,9 +83,12 @@ fun VideoPlayerScreen(
 
     val uiState by playerViewModel.uiState.collectAsState()
     val seekerState = playerViewModel.seekerState.collectAsState()
+    // One latest-only clock for the lanes, counters and diagnostics. Playback/seek
+    // animations and the downloader itself are not throttled by this presentation cap.
+    val downloadFrames = remember(playerViewModel) { playerViewModel.downloadSnapshot.sample(100L) }
     val downloadSnapshot =
-        if (Prefs.parallelDownloadEnabled && Prefs.showParallelDownloads) {
-            playerViewModel.downloadSnapshot.collectAsStateWithLifecycle().value
+        if (Prefs.parallelDownloadEnabled && (Prefs.showParallelDownloads || Prefs.showDownloadDiagnostics)) {
+            downloadFrames.collectAsStateWithLifecycle(initialValue = DownloadSnapshot()).value
         } else {
             null
         }
@@ -264,7 +271,8 @@ fun VideoPlayerScreen(
         videoShotCache = videoShotCache,
         uiState = mergedUiState,
         seekerState = seekerState,
-        downloadSnapshot = downloadSnapshot,
+        downloadSnapshot = downloadSnapshot.takeIf { Prefs.showParallelDownloads },
+        diagnosticsSnapshot = downloadSnapshot.takeIf { Prefs.showDownloadDiagnostics },
         onPlay = {
             logger.info { "[PLAYBACK] play aid=${uiState.aid}, cid=${uiState.cid}" }
             playerViewModel.togglePlayPause()

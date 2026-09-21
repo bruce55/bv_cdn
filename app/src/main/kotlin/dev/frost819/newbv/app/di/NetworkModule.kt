@@ -8,6 +8,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import dev.frost819.newbv.BuildConfig
 import dev.frost819.newbv.app.data.AccountRepositoryImpl
+import dev.frost819.newbv.app.network.DownloadMemoryJournal
 import dev.frost819.newbv.app.network.HttpServer
 import dev.frost819.newbv.biliapi.http.BiliHttpApi
 import dev.frost819.newbv.biliapi.repositories.AuthRepository
@@ -36,6 +37,7 @@ import dev.frost819.newbv.data.db.dao.UserDao
 import dev.frost819.newbv.data.repository.AccountRepository
 import dev.frost819.newbv.data.repository.SearchHistoryRepository
 import dev.frost819.newbv.data.repository.SearchHistoryRepositoryImpl
+import dev.frost819.newbv.player.download.DownloadTraceStore
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
@@ -362,13 +364,15 @@ object NetworkModule {
      * - 创建手动日志
      *
      * 依赖 [CrashHandler]（日志文件读写）。
-     * 由 [dev.frost819.newbv.app.BVApplication] 在应用启动时调用 [HttpServer.start] 启动。
+     * 日志页面按需启动；启用播放下载日志后保持运行，直到用户关闭或应用退出。
      */
     @Provides
     @Singleton
     fun provideHttpServer(
         @ApplicationContext context: Context,
         crashHandler: CrashHandler,
+        downloadTraceStore: DownloadTraceStore,
+        memoryJournal: DownloadMemoryJournal,
     ): HttpServer {
         val assetProvider: (String) -> ByteArray? = { path ->
             runCatching {
@@ -379,7 +383,7 @@ object NetworkModule {
         }
 
         val logFileProvider: () -> List<File> = {
-            crashHandler.listManualLogs() + crashHandler.listCrashLogs()
+            crashHandler.listManualLogs() + crashHandler.listCrashLogs() + crashHandler.listBufferingLogs()
         }
 
         val manualLogCreator: () -> File? = { crashHandler.createManualLog() }
@@ -388,6 +392,8 @@ object NetworkModule {
             assetProvider = assetProvider,
             logFileProvider = logFileProvider,
             manualLogCreator = manualLogCreator,
+            downloadTraceStore = downloadTraceStore,
+            memoryJournal = memoryJournal,
         )
     }
 }

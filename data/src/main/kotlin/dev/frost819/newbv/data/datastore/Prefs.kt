@@ -232,14 +232,35 @@ object Prefs {
     /** Enables bounded parallel VOD range downloading; off until explicitly enabled. */
     var parallelDownloadEnabled by pref(PrefKeys.parallelDownloadEnabled, false)
 
+    private var storedMinimumDownloadBlockKiB by pref(PrefKeys.minimumDownloadBlockKiB, 512)
+
+    /** Minimum request piece size in KiB; legacy automatic values now use the 512 KiB default. */
+    var minimumDownloadBlockKiB: Int
+        get() = storedMinimumDownloadBlockKiB.takeIf { it > 0 }?.coerceIn(64, 4096) ?: 512
+        set(value) {
+            storedMinimumDownloadBlockKiB = if (value > 0) value.coerceIn(64, 4096) else 512
+        }
+
     /** Shared active-request budget for video, audio and retries. */
-    var parallelDownloadRequests by pref(PrefKeys.parallelDownloadRequests, 4)
+    var parallelDownloadRequests by pref(PrefKeys.parallelDownloadRequests, 8)
 
     /** Automatic CDN route preference: mainland or overseas. */
     var parallelDownloadMode by pref(PrefKeys.parallelDownloadMode, "mainland")
 
     /** Independently enables indexed download blocks and the active-request counter. */
     var showParallelDownloads by pref(PrefKeys.showParallelDownloads, false)
+
+    /** Download progress display size: compact, normal (default), large, or extra_large. */
+    var downloadProgressSize by pref(PrefKeys.downloadProgressSize, "normal")
+
+    /** Shows bounded rolling network charts inside the download diagnostics overlay. */
+    var showDownloadChart by pref(PrefKeys.showDownloadChart, false)
+
+    /** Keeps opened playback controls visible for download diagnostics. */
+    var keepDownloadControlsVisible by pref(PrefKeys.keepDownloadControlsVisible, false)
+
+    /** Show per-host parallel download diagnostics with the playback controls. */
+    var showDownloadDiagnostics by pref(PrefKeys.showDownloadDiagnostics, false)
 
     /** Optional VOD CDN authority; empty keeps upstream automatic selection. */
     var cdnOverrideHost by pref(PrefKeys.cdnOverrideHost, "")
@@ -412,6 +433,9 @@ object Prefs {
 
     /** 缓存自动清空开关（关闭后不自动清理）。 */
     var cacheAutoClean by pref(PrefKeys.cacheAutoClean, true)
+
+    /** Persist sustained buffering diagnostics locally, independently of the live log server. */
+    var bufferingLogsEnabled by pref(PrefKeys.bufferingLogsEnabled, false)
 
     // ===== Flow 属性（用于 Compose collectAsState 实时观察） =====
 

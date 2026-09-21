@@ -37,9 +37,14 @@ internal object PrefKeys {
 
     // ===== 网络 & API =====
     val parallelDownloadEnabled = booleanPreferencesKey("parallel_download_enabled")
+    val minimumDownloadBlockKiB = intPreferencesKey("minimum_download_block_kib")
     val parallelDownloadRequests = intPreferencesKey("parallel_download_requests")
     val parallelDownloadMode = stringPreferencesKey("parallel_download_mode")
     val showParallelDownloads = booleanPreferencesKey("show_parallel_downloads")
+    val downloadProgressSize = stringPreferencesKey("download_progress_size")
+    val showDownloadChart = booleanPreferencesKey("show_download_chart")
+    val keepDownloadControlsVisible = booleanPreferencesKey("keep_download_controls_visible")
+    val showDownloadDiagnostics = booleanPreferencesKey("show_download_diagnostics")
     val cdnOverrideHost = stringPreferencesKey("cdn_override_host")
     val apiType = intPreferencesKey("api_type")
     val crashReportEnabled = booleanPreferencesKey("crash_report_enabled")
@@ -84,5 +89,6 @@ internal object PrefKeys {
 
     // ===== 存储设置 =====
     val cacheThreshold = intPreferencesKey("cache_threshold")
+    val bufferingLogsEnabled = booleanPreferencesKey("buffering_logs_enabled")
     val cacheAutoClean = booleanPreferencesKey("cache_auto_clean")
 }

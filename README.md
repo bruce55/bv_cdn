@@ -22,6 +22,12 @@ newBV 是基于 [BV](https://github.com/aaa1115910/bv) 重构的 [哔哩哔哩](
 
 > 原版 BV 的代码仍保留在本仓库的 [`bv-feature`](../../tree/bv-feature) 分支。
 
+## CDN 分支文档
+
+本分支的并行下载、CDN 调度、补救、缓存与诊断设计见
+[下载器文档入口](docs/CDN-downloader.md)。流量、交付、缓存与开销的区别见
+[传输统计说明](docs/CDN-transfer-accounting.md)。
+
 ## 基于 BV 的升级点
 
 ### 功能升级

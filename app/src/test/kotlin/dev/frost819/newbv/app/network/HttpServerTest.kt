@@ -1,7 +1,11 @@
 package dev.frost819.newbv.app.network
 
 import com.google.common.truth.Truth.assertThat
+import dev.frost819.newbv.player.download.DownloadTraceStore
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -239,6 +243,73 @@ class HttpServerTest {
 
         val (status, _) = httpGet("/api/logs/create-manual-and-download")
         assertThat(status).isEqualTo(500)
+    }
+
+    @Test
+    fun `download trace endpoint exports incremental redacted events and rejects invalid cursor`() {
+        server.stop()
+        val trace = DownloadTraceStore()
+        server = HttpServer({ null }, { emptyList() }, { null }, trace)
+        server.setDownloadCapture(true)
+        trace.record(
+            "session",
+            "cdn_pick",
+            mapOf(
+                "host" to "cdn.example",
+                "reason" to "unused_feasible",
+                "url" to "https://signed.example/?token=secret",
+            ),
+        )
+        trace.record("session", "scheduler", mapOf("active" to 3, "limit" to 16))
+        val (status, body) = httpGet("/api/download/events?after=1")
+        assertThat(status).isEqualTo(200)
+        val page = json.parseToJsonElement(body).jsonObject
+        assertThat(page["events"]!!.jsonArray).hasSize(1)
+        assertThat(
+            page["events"]!!
+                .jsonArray[0]
+                .jsonObject["type"]!!
+                .jsonPrimitive.content,
+        ).isEqualTo("scheduler")
+        val full = httpGet("/api/download/events").second
+        assertThat(full).contains("unused_feasible")
+        assertThat(full).doesNotContain("signed.example")
+        assertThat(httpGet("/api/download/events?after=-1").first).isEqualTo(400)
+        assertThat(httpGet("/api/download/events?after=abc").first).isEqualTo(400)
+    }
+
+    @Test
+    fun `memory endpoint serves retained redacted JSONL after capture has stopped`() {
+        server.stop()
+        val journal = DownloadMemoryJournal(File(tempDir, "memory"))
+        val trace = DownloadTraceStore(memoryEventSink = journal::record)
+        trace.setEnabled(true)
+        trace.record("previous-process", "memory_trim", mapOf("level" to 80, "token" to "do-not-export"))
+        trace.setEnabled(false)
+        journal.close()
+        server = HttpServer({ null }, { emptyList() }, { null }, memoryJournal = journal)
+        server.start()
+        val (status, body) = httpGet("/api/download/memory")
+        assertThat(status).isEqualTo(200)
+        assertThat(body).contains("previous-process")
+        assertThat(body).contains("memory_trim")
+        assertThat(body).doesNotContain("do-not-export")
+        assertThat(server.isDownloadCaptureEnabled()).isFalse()
+        Json.parseToJsonElement(body.trim())
+    }
+
+    @Test
+    fun `capture survives leaving viewer until disabled and server released`() {
+        server.setDownloadCapture(true)
+        val port = server.getPort()
+        server.stopUnlessCapturing()
+        assertThat(server.isRunning()).isTrue()
+        assertThat(server.getPort()).isEqualTo(port)
+        server.setDownloadCapture(false)
+        assertThat(server.isDownloadCaptureEnabled()).isFalse()
+        assertThat(server.isRunning()).isTrue()
+        server.stopUnlessCapturing()
+        assertThat(server.isRunning()).isFalse()
     }
 
     // ── 辅助方法 ──────────────────────────────────────────────────────

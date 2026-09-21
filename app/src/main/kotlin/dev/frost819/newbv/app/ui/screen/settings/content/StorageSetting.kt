@@ -64,6 +64,7 @@ fun StorageSetting(modifier: Modifier = Modifier) {
     var cacheSize by remember { mutableLongStateOf(0L) }
     var crashLogsSize by remember { mutableLongStateOf(0L) }
     var cacheThreshold by remember { mutableStateOf(Prefs.cacheThreshold) }
+    var bufferingLogs by remember { mutableStateOf(Prefs.bufferingLogsEnabled) }
     var autoCleanEnabled by remember { mutableStateOf(Prefs.cacheAutoClean) }
 
     var showClearDialog by remember { mutableStateOf(false) }
@@ -140,6 +141,22 @@ fun StorageSetting(modifier: Modifier = Modifier) {
                         title = "清理缓存",
                         supportText = if (loading) "计算中..." else "当前：${cacheSize / CacheManager.BYTES_PER_MB} MB",
                         onClick = { showClearDialog = true },
+                    )
+                }
+                item {
+                    SettingListItem(
+                        title = "卡顿日志",
+                        supportText = "缓冲超过 3 秒自动保存，保留最近 5 份；在日志管理查看",
+                        trailingContent = {
+                            Switch(checked = bufferingLogs, onCheckedChange = {
+                                bufferingLogs = it
+                                Prefs.bufferingLogsEnabled = it
+                            })
+                        },
+                        onClick = {
+                            bufferingLogs = !bufferingLogs
+                            Prefs.bufferingLogsEnabled = bufferingLogs
+                        },
                     )
                 }
                 item {
