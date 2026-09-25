@@ -85,6 +85,12 @@ data class DownloadAvailableRange(
     val endTimeMs: Long,
 )
 
+/** Media-time interval available for every required track; the end is exclusive. */
+data class DownloadBufferedRange(
+    val startTimeMs: Long,
+    val endTimeMs: Long,
+)
+
 /** Body-copy accounting when [exact] is true; otherwise the legacy session file-range estimate. */
 data class DownloadTransferStats(
     val downloadedBytes: Long = 0,
@@ -150,6 +156,7 @@ data class DownloadSnapshot(
     val waitReason: String? = null,
     val schedulingState: PlaybackSchedulingState = PlaybackSchedulingState.Starting,
     val transferMeasurements: DownloadTransferMeasurements = DownloadTransferMeasurements(),
+    val bufferedRanges: List<DownloadBufferedRange> = emptyList(),
 )
 
 /** Session-local host diagnostics, excluding signed paths, query strings and request headers. */

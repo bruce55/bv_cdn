@@ -18,8 +18,12 @@ Settings → Other → 播放源地区覆盖 selects a region, a specific node, 
 HTTP(S) host/URL. 使用默认源 removes the override. The selected host is persisted
 in `cdn_override_host` and applies on the next playback load or media-profile
 change. Both video and audio are overridden, including Dolby/FLAC when selected.
-The upstream official-CDN preference is always active; its old toggle is no
-longer needed. Live streams retain upstream's separate line selection.
+Single-stream playback prefers official API candidates. Upstream's optional
+automatic selection (integrated through `6a5d231e`) is grouped with these CDN
+controls; it ranks candidates before playback and tries another video candidate
+after an error. Parallel mode takes precedence, followed by a manual host, then
+automatic single-stream selection. See [the shared selection boundary](CDN-downloader.md#integration-with-upstream-automatic-selection).
+Live streams retain upstream's separate line selection.
 
 The new application has a different package ID from legacy BV, so Android does
 not automatically transfer the old app's settings/login. Configure the CDN in

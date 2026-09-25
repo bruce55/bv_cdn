@@ -52,7 +52,40 @@ Configured concurrency is a ceiling, not a promise to keep every slot occupied.
 Empty slots must be explainable as lack of requested work, admission priority,
 CDN eligibility, memory shortage, or Media3's actual loading decision.
 
+## Standard buffer display
+
+With parallel downloading enabled, the standard progress bar also shows retained
+downloader cache plus Media3 buffering, even when detailed lanes and diagnostics
+are disabled. It uses the same 10 Hz availability snapshots as the lanes. Each
+track first unions its local and player ranges; the standard bar shades only their
+intersection across required tracks. Video-only media needs only video. Cached
+islands remain separate, and eviction or seeking updates the shading from current
+ownership rather than historical download events. Both expanded and persistent
+standard bars use translucent buffer shading for these intervals.
+
 ## CDN candidates and measurements
+
+### Integration with upstream automatic selection
+
+`CdnUrls` owns signed URL preservation, normalization, and official-candidate
+preference. `CdnPlaybackPolicy` chooses the playback mode once per source:
+
+| Mode (in precedence order) | Candidate preparation | Recovery owner |
+| --- | --- | --- |
+| Parallel enabled | All original signed API URLs; `CdnResolver` expands the configured region | Downloader admission, per-block rescue and cooldowns |
+| Manual host selected | Preferred API URL with eligible authority replaced | Normal Media3 error handling; no automatic node change |
+| Automatic single stream | Upstream `CdnSelector` ranks official API candidates | ViewModel advances video candidate, retains audio and playback position |
+| Default | First preferred official API URL | Normal Media3 error handling |
+
+All modes construct `VodPlaybackSource` with content and representation identities.
+Codec fallback, quality changes and single-stream CDN fallback use `playSource`;
+they must not drop metadata through `playUrl`. The automatic selection switch lives
+with the CDN controls and is disabled while parallel or manual mode takes precedence.
+
+Upstream's 128 KiB preflight scores are cached by host for ten minutes. They remain
+separate from parallel playback's representation-specific, media-position-weighted
+block speeds. Parallel mode does not run upstream preflight requests or its
+player-level CDN restart path, so it has no unaccounted second probe pool.
 
 Candidates combine Bilibili's signed playback base/backup URLs with a bundled list
 adapted from thread-ripper: eight mainland hosts or four overseas hosts. Compatible

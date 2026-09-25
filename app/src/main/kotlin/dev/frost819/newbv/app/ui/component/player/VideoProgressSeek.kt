@@ -6,8 +6,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.SliderColors
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -15,16 +13,21 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.tv.material3.MaterialTheme
 import dev.frost819.newbv.core.theme.BVTheme
 import dev.frost819.newbv.data.datastore.Prefs
+import dev.frost819.newbv.player.download.DownloadBufferedRange
 import dev.frost819.newbv.player.download.DownloadSnapshot
 
 /**
  * 视频进度条。
  *
  * 使用 Canvas 绘制三层进度线：背景轨道、缓冲进度、播放进度。
+ * 三段轨道用「色相 + 明度」双重区分，避免混在一起：
+ * 已播放用品牌色（primary），已缓冲用较亮的中性灰，未缓冲用很暗的中性灰。
+ * 播放器固定运行在深色主题下，均能保证黑底上的可见性。
  * 支持两种显示模式：
- * - **常显模式**（[isPersistentSeek] = true）：2dp 细线，不显示缓冲进度，
+ * - **常显模式**（[isPersistentSeek] = true）：2dp 细线，仅并行下载时显示合并缓冲区间，
  *   用于播放器底部始终可见的进度条。
  * - **交互模式**（[isPersistentSeek] = false）：8dp 粗线，显示缓冲进度，
  *   用于控制器信息栏中的可交互 seek bar。
@@ -35,6 +38,7 @@ import dev.frost819.newbv.player.download.DownloadSnapshot
  * @param bufferedPercentage 缓冲百分比（0-100）
  * @param isPersistentSeek 是否为常显模式
  * @param downloadSnapshot Optional index-mapped download lanes; null hides the visualization.
+ * @param bufferedRanges Combined cache/player intervals for the standard bar; null uses the player percentage.
  */
 @Composable
 fun VideoProgressSeek(
@@ -44,6 +48,7 @@ fun VideoProgressSeek(
     bufferedPercentage: Int,
     isPersistentSeek: Boolean,
     downloadSnapshot: DownloadSnapshot? = null,
+    bufferedRanges: List<DownloadBufferedRange>? = null,
 ) {
     val trackWidthDp = if (isPersistentSeek) 2.dp else 8.dp
 
@@ -75,7 +80,8 @@ fun VideoProgressSeek(
             position = position,
             bufferedPercentage = bufferedPercentage,
             isPersistentSeek = isPersistentSeek,
-            showBuffered = !isPersistentSeek,
+            showBuffered = !isPersistentSeek || bufferedRanges != null,
+            bufferedRanges = bufferedRanges,
             modifier = frameModifier,
         )
     }
@@ -97,10 +103,14 @@ private fun PlaybackProgressLine(
     bufferedPercentage: Int,
     isPersistentSeek: Boolean,
     showBuffered: Boolean,
+    bufferedRanges: List<DownloadBufferedRange>? = null,
     modifier: Modifier = Modifier,
 ) {
-    val colors: SliderColors = SliderDefaults.colors()
     val trackWidthDp = if (isPersistentSeek) 2.dp else 8.dp
+    val activeTrackColor = MaterialTheme.colorScheme.primary
+    val bufferedTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+    val inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f)
+
     Canvas(
         modifier =
             modifier
@@ -112,7 +122,7 @@ private fun PlaybackProgressLine(
 
         // 背景轨道
         drawLine(
-            color = colors.inactiveTrackColor,
+            color = inactiveTrackColor,
             start = Offset(0f, center.y),
             end = Offset(size.width, center.y),
             strokeWidth = trackWidthPx,
@@ -122,9 +132,22 @@ private fun PlaybackProgressLine(
         // 缓冲进度（仅交互模式显示）
         // The download lanes show actual local intervals; a zero-to-buffered overlay
         // would falsely fill holes and discarded history after seeking.
-        if (showBuffered && bufferedPercentage > 0) {
+        if (showBuffered && bufferedRanges != null && duration > 0) {
+            for (range in bufferedRanges) {
+                val left = (range.startTimeMs.toDouble() / duration).coerceIn(0.0, 1.0).toFloat() * size.width
+                val right = (range.endTimeMs.toDouble() / duration).coerceIn(0.0, 1.0).toFloat() * size.width
+                if (right <= left) continue
+                drawLine(
+                    color = bufferedTrackColor,
+                    start = Offset(left, center.y),
+                    end = Offset(right, center.y),
+                    strokeWidth = trackWidthPx,
+                    cap = StrokeCap.Butt,
+                )
+            }
+        } else if (showBuffered && bufferedPercentage > 0 && bufferedRanges == null) {
             drawLine(
-                color = colors.disabledActiveTrackColor,
+                color = bufferedTrackColor,
                 start = Offset(trackWidthPx / 2, center.y),
                 end = Offset(size.width * bufferedPercentage / 100, center.y),
                 strokeWidth = trackWidthPx,
@@ -136,7 +159,7 @@ private fun PlaybackProgressLine(
         if (duration > 0) {
             val progressRatio = (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
             drawLine(
-                color = colors.activeTrackColor,
+                color = activeTrackColor,
                 start = Offset(trackWidthPx / 2, center.y),
                 end = Offset(size.width * progressRatio, center.y),
                 strokeWidth = trackWidthPx,

@@ -12,6 +12,38 @@ import java.nio.ByteBuffer
 @OptIn(ExperimentalCoroutinesApi::class)
 class DownloadAvailabilityTest {
     @Test
+    fun `standard bar receives combined buffer with visualization and diagnostics disabled`() =
+        runTest {
+            val monitor = DownloadMonitor(ParallelDownloadConfig(enabled = true), backgroundScope)
+            val bytes = index()
+            val base = bytes.size.toLong()
+            monitor.recordBytes(DownloadTrack.Video, 0, bytes)
+            var cached = listOf(base + 200 until base + 300)
+            monitor.setAvailabilitySampler(setOf(DownloadTrack.Video)) { mapOf(DownloadTrack.Video to cached) }
+            monitor.updatePlayback(500, 1f, true, true, false, bufferedPositionMs = 1500)
+            runCurrent()
+            advanceTimeBy(100)
+            runCurrent()
+            assertThat(monitor.snapshots.value.bufferedRanges)
+                .containsExactly(
+                    DownloadBufferedRange(500, 1500),
+                    DownloadBufferedRange(2000, 3000),
+                ).inOrder()
+            cached = emptyList()
+            monitor.updatePlayback(600, 1f, true, true, false, bufferedPositionMs = 1500)
+            runCurrent()
+            advanceTimeBy(100)
+            runCurrent()
+            assertThat(monitor.snapshots.value.bufferedRanges).containsExactly(DownloadBufferedRange(600, 1500))
+            monitor.clearPlayerBuffer()
+            runCurrent()
+            advanceTimeBy(100)
+            runCurrent()
+            assertThat(monitor.snapshots.value.bufferedRanges).isEmpty()
+            monitor.close()
+        }
+
+    @Test
     fun `cache and player buffer form a union without painting holes or historical completions`() =
         runTest {
             val monitor = DownloadMonitor(ParallelDownloadConfig(visualizationEnabled = true), backgroundScope)

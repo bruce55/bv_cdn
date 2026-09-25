@@ -70,7 +70,11 @@ fun MainScreen(
     val homeFocusRequester = remember { FocusRequester() }
     val focusSaver = rememberFocusSaver()
 
-    focusSaver.RestoreFocus()
+    // 仅"返回 MainScreen"时恢复焦点；首次进入不恢复，
+    // 否则启动阶段系统自动聚焦左侧栏头像产生的 key 会把焦点抢回头像。
+    if (focusInitialized) {
+        focusSaver.RestoreFocus()
+    }
 
     val handleBack =
         rememberDoublePressExit(
@@ -78,14 +82,20 @@ fun MainScreen(
             message = "再按一次退出",
         )
 
-    val onFocusToContent: () -> Unit = {
-        runCatching { homeFocusRequester.requestFocus() }
+    // 返回 true 表示已把焦点移入内容区入口；返回 false 时由左侧栏回退到
+    // 焦点系统的默认右向搜索（内容区入口被懒列表回收时，见 issue #287）。
+    val onFocusToContent: () -> Boolean = {
+        runCatching { homeFocusRequester.requestFocus() }.isSuccess
     }
 
     LaunchedEffect(Unit) {
         if (!focusInitialized) {
             focusInitialized = true
-            runCatching { onFocusToContent() }
+            // 冷启动时 Compose 会默认聚焦首个可聚焦元素（左侧栏头像），
+            // 该焦点会被 FocusSaver 记录，导致 RestoreFocus 随后把焦点抢回头像。
+            // 首次进入时先清除这个被污染的 key，再强制聚焦内容区。
+            focusSaver.clearFocusedKey()
+            onFocusToContent()
         }
     }
 

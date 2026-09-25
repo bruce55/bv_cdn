@@ -304,6 +304,7 @@ class LivePlayerViewModel
          * 以 500ms 间隔从播放器读取属性，组合成 debug 字符串。
          * 设置关闭时不启动，避免无谓开销。
          */
+        @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
         private fun startDebugInfoUpdater() {
             if (!Prefs.showPlayerDebugInfo) return
             if (debugInfoJob?.isActive == true) return

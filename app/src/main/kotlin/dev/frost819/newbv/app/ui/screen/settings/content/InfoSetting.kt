@@ -76,7 +76,13 @@ fun InfoSetting(
     val screenInfo =
         remember {
             runCatching {
-                val display = context.display ?: return@runCatching Triple(0, 0, 0f)
+                val display =
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        context.display
+                    } else {
+                        @Suppress("DEPRECATION")
+                        (context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager).defaultDisplay
+                    } ?: return@runCatching Triple(0, 0, 0f)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     val mode = display.mode
                     Triple(mode.physicalWidth, mode.physicalHeight, mode.refreshRate)

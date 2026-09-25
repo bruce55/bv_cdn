@@ -1,5 +1,6 @@
 package dev.frost819.newbv.player.download
 
+import dev.frost819.newbv.player.CdnUrls
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.net.URI
 import kotlin.random.Random
@@ -192,9 +193,7 @@ internal class CdnResolver(
                         ) {
                             return@mapNotNull null
                         }
-                        val authority = runCatching { URI(original).rawAuthority }.getOrNull() ?: return@mapNotNull null
-                        val start = original.indexOf("://") + 3
-                        original.substring(0, start) + host + original.substring(start + authority.length)
+                        CdnUrls.override(original, host)
                     }
                 }.orEmpty()
         return if (config.mode == CdnMode.Pinned) {

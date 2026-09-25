@@ -467,6 +467,82 @@ class HomeViewModelTest {
         }
 
     @Test
+    fun `loadRecommend with existing items appends exactly one more page`() =
+        runTest(testDispatcher) {
+            viewModel = createViewModel()
+            advanceUntilIdle()
+
+            // 首次加载：列表为空，最多补齐 3 页（每页 2 条），共 6 条
+            assertThat(viewModel.uiState.value.recommendItems).hasSize(6)
+            coVerify(exactly = 3) { recommendRepo.getRecommendVideos(any(), any()) }
+
+            viewModel.loadRecommend()
+            advanceUntilIdle()
+
+            // 已有数据时「加载更多」只追加一页，而非空转（issue #286）
+            assertThat(viewModel.uiState.value.recommendItems).hasSize(8)
+            coVerify(exactly = 4) { recommendRepo.getRecommendVideos(any(), any()) }
+        }
+
+    @Test
+    fun `loadRecommend sets hasMore false when page is empty`() =
+        runTest(testDispatcher) {
+            coEvery { recommendRepo.getRecommendVideos(any(), any()) } returns
+                RecommendData(
+                    items = listOf(fakeUgcItem(1)),
+                    nextPage = RecommendPage(),
+                )
+            viewModel = createViewModel()
+            advanceUntilIdle()
+            assertThat(viewModel.uiState.value.recommendHasMore).isTrue()
+
+            coEvery { recommendRepo.getRecommendVideos(any(), any()) } returns
+                RecommendData(
+                    items = emptyList(),
+                    nextPage = RecommendPage(),
+                )
+            viewModel.loadRecommend()
+            advanceUntilIdle()
+
+            assertThat(viewModel.uiState.value.recommendHasMore).isFalse()
+        }
+
+    @Test
+    fun `loadRecommend keeps partial data and no error when a later page fails`() =
+        runTest(testDispatcher) {
+            coEvery { recommendRepo.getRecommendVideos(any(), any()) } returns
+                RecommendData(
+                    items = listOf(fakeUgcItem(1)),
+                    nextPage = RecommendPage(),
+                ) andThenThrows RuntimeException("boom")
+
+            viewModel = createViewModel()
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            // 第 2 页失败：保留第 1 页数据，不整块报错
+            assertThat(state.recommendItems).hasSize(1)
+            assertThat(state.recommendError).isFalse()
+            assertThat(state.recommendLoading).isFalse()
+        }
+
+    @Test
+    fun `loadRecommend load-more failure sets error but keeps items`() =
+        runTest(testDispatcher) {
+            viewModel = createViewModel()
+            advanceUntilIdle()
+            assertThat(viewModel.uiState.value.recommendItems).isNotEmpty()
+
+            coEvery { recommendRepo.getRecommendVideos(any(), any()) } throws RuntimeException("boom")
+            viewModel.loadRecommend()
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            assertThat(state.recommendItems).isNotEmpty()
+            assertThat(state.recommendError).isTrue()
+        }
+
+    @Test
     fun `refresh dispatches Popular tab`() =
         runTest(testDispatcher) {
             viewModel = createViewModel()

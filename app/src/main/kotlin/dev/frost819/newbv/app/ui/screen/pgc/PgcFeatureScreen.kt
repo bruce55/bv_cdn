@@ -21,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -30,6 +31,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -62,6 +64,8 @@ import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import dev.frost819.newbv.app.ui.component.FocusSaver
 import dev.frost819.newbv.app.ui.component.LoadingTip
+import dev.frost819.newbv.app.ui.component.dialog.EpisodeGridButton
+import dev.frost819.newbv.app.ui.component.dialog.EpisodeListDialog
 import dev.frost819.newbv.app.ui.component.rememberFocusSaver
 import dev.frost819.newbv.app.ui.navigation.PgcFeatureRoute
 import dev.frost819.newbv.app.ui.navigation.VideoPlayerRoute
@@ -71,7 +75,14 @@ import dev.frost819.newbv.app.viewmodel.pgc.SeasonDetailUiState
 import dev.frost819.newbv.app.viewmodel.pgc.SeasonDetailViewModel
 import dev.frost819.newbv.biliapi.entity.video.season.Episode
 import dev.frost819.newbv.biliapi.entity.video.season.SeasonDetail
+import dev.frost819.newbv.core.focus.focusInvertedColors
 import dev.frost819.newbv.core.focus.touchClickable
+
+/** 集数超过该值时显示网格快速选集按钮。 */
+private const val SEASON_EPISODE_DIALOG_THRESHOLD = 20
+
+/** 快速选集弹窗每页集数。 */
+private const val SEASON_EPISODE_DIALOG_PAGE_SIZE = 50
 
 /**
  * 番剧详情页路由注册。
@@ -160,6 +171,11 @@ private fun SeasonDetailContent(
     focusSaver.RestoreFocus()
     val scrollState = rememberScrollState()
 
+    // 快速选集弹窗状态：当前打开的是哪一行的剧集
+    var showEpisodeDialog by remember { mutableStateOf(false) }
+    var dialogTitle by remember { mutableStateOf("") }
+    var dialogEpisodes by remember { mutableStateOf<List<Episode>>(emptyList()) }
+
     // 切换季时用 key 强制重组，重置所有 LazyRow 滚动位置
     key(detail.seasonId) {
         Column(
@@ -182,8 +198,13 @@ private fun SeasonDetailContent(
                 SeasonEpisodeRow(
                     title = "正片",
                     episodes = detail.episodes,
-                    progress = detail.userStatus.progress,
+                    lastPlayedCid = state.historyLastPlayedCid,
                     onClick = { episode -> viewModel.onPlayEpisode(episode) },
+                    onShowListDialog = {
+                        dialogTitle = "正片"
+                        dialogEpisodes = detail.episodes
+                        showEpisodeDialog = true
+                    },
                     focusSaver = focusSaver,
                     rowKey = "episodes",
                 )
@@ -193,8 +214,13 @@ private fun SeasonDetailContent(
                 SeasonEpisodeRow(
                     title = section.title,
                     episodes = section.episodes,
-                    progress = detail.userStatus.progress,
+                    lastPlayedCid = state.historyLastPlayedCid,
                     onClick = { episode -> viewModel.onPlayEpisode(episode) },
+                    onShowListDialog = {
+                        dialogTitle = section.title
+                        dialogEpisodes = section.episodes
+                        showEpisodeDialog = true
+                    },
                     focusSaver = focusSaver,
                     rowKey = "section_${section.id}",
                 )
@@ -209,6 +235,30 @@ private fun SeasonDetailContent(
                 )
             }
         }
+    }
+
+    if (showEpisodeDialog) {
+        val lastPlayedCid = state.historyLastPlayedCid
+        val lastPlayedTime = state.historyLastPlayedTime
+        EpisodeListDialog(
+            title = dialogTitle,
+            entries = dialogEpisodes,
+            pageSize = SEASON_EPISODE_DIALOG_PAGE_SIZE,
+            keyOf = { it.id },
+            titleOf = { it.title },
+            durationOf = { it.duration },
+            playedOf = { episode ->
+                // 仅记录最近一次观看的分集进度，其余分集无单集进度
+                if (lastPlayedCid != 0L && episode.cid == lastPlayedCid) lastPlayedTime else 0
+            },
+            isCurrentOf = { episode -> lastPlayedCid != 0L && episode.cid == lastPlayedCid },
+            tabLabelOf = { start, end -> "$start-$end" },
+            onDismiss = { showEpisodeDialog = false },
+            onSelect = { episode ->
+                showEpisodeDialog = false
+                viewModel.onPlayEpisode(episode)
+            },
+        )
     }
 }
 
@@ -366,7 +416,7 @@ private fun SeasonActionButton(
         onClick = onClick,
         shape = ClickableSurfaceDefaults.shape(shape = MaterialTheme.shapes.small),
         colors =
-            ClickableSurfaceDefaults.colors(
+            focusInvertedColors(
                 containerColor =
                     if (highlighted) {
                         accentColor.copy(alpha = 0.2f)
@@ -390,17 +440,10 @@ private fun SeasonActionButton(
                 imageVector = icon,
                 contentDescription = text,
                 modifier = Modifier.size(20.dp),
-                tint = if (highlighted) accentColor else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
                 text = text,
                 style = MaterialTheme.typography.labelMedium,
-                color =
-                    if (highlighted) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
             )
         }
     }
@@ -410,8 +453,9 @@ private fun SeasonActionButton(
 private fun SeasonEpisodeRow(
     title: String,
     episodes: List<Episode>,
-    progress: SeasonDetail.UserStatus.Progress?,
+    lastPlayedCid: Long,
     onClick: (Episode) -> Unit,
+    onShowListDialog: () -> Unit,
     focusSaver: FocusSaver,
     rowKey: String,
 ) {
@@ -419,12 +463,57 @@ private fun SeasonEpisodeRow(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(horizontal = 50.dp),
-        )
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 50.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            if (episodes.size > SEASON_EPISODE_DIALOG_THRESHOLD) {
+                EpisodeGridButton(onClick = onShowListDialog)
+            }
+            // 与 UGC 详情页一致：显示「上次播放到」按钮，一键回到断点分集
+            if (episodes.size > 1 && lastPlayedCid != 0L) {
+                val lastEpisode = episodes.find { it.cid == lastPlayedCid }
+                if (lastEpisode != null) {
+                    Surface(
+                        onClick = { onClick(lastEpisode) },
+                        modifier = Modifier.touchClickable(onClick = { onClick(lastEpisode) }),
+                        shape = ClickableSurfaceDefaults.shape(shape = MaterialTheme.shapes.small),
+                        // 不做聚焦放大：否则会盖住左侧的网格列表按钮
+                        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
+                        colors =
+                            focusInvertedColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.History,
+                                contentDescription = "历史",
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Text(
+                                text = "上次播放到：${lastEpisode.title}",
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                    }
+                }
+            }
+        }
         val focusRequester = focusSaver.focusRequesterFor(rowKey)
         LazyRow(
             modifier =
@@ -439,7 +528,7 @@ private fun SeasonEpisodeRow(
                 val epKey = "${rowKey}_${episode.id}"
                 EpisodeCard(
                     episode = episode,
-                    isLastWatched = progress?.lastEpId == episode.epid,
+                    isLastWatched = lastPlayedCid != 0L && episode.cid == lastPlayedCid,
                     onClick = { onClick(episode) },
                     modifier =
                         if (episode == episodes.first()) {
@@ -614,7 +703,7 @@ private fun SeasonChip(
         onClick = onClick,
         shape = ClickableSurfaceDefaults.shape(shape = MaterialTheme.shapes.small),
         colors =
-            ClickableSurfaceDefaults.colors(
+            focusInvertedColors(
                 containerColor =
                     if (isCurrent) {
                         MaterialTheme.colorScheme.secondaryContainer
@@ -633,12 +722,6 @@ private fun SeasonChip(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             text = title,
             style = MaterialTheme.typography.labelMedium,
-            color =
-                if (isCurrent) {
-                    MaterialTheme.colorScheme.onSecondaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
         )
     }
 }
@@ -685,7 +768,7 @@ private fun SeasonErrorScreen(
                             ),
                     ),
                 colors =
-                    ClickableSurfaceDefaults.colors(
+                    focusInvertedColors(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant,
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ),
@@ -693,7 +776,6 @@ private fun SeasonErrorScreen(
                 Text(
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
                     text = "重试",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

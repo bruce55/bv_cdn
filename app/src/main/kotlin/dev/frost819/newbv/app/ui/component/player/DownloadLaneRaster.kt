@@ -42,7 +42,7 @@ internal fun rasterizeLaneRow(
     }
     edges.sortBy { it.x }
     val active = BooleanArray(spans.size)
-    val winners = PriorityQueue<Int>(compareByDescending<Int> { spans[it].priority }.thenByDescending { it })
+    val winners = PriorityQueue<Int>(11, compareByDescending<Int> { spans[it].priority }.thenByDescending { it })
     val coverage = FloatArray(width * 4)
     var previous = 0.0
     var edgeIndex = 0

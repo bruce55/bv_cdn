@@ -23,6 +23,7 @@ fun CdnOverrideSetting() {
     var showNodes by rememberSaveable { mutableStateOf(false) }
     var showCustom by rememberSaveable { mutableStateOf(false) }
     var customInput by rememberSaveable { mutableStateOf("") }
+    var autoSelect by rememberSaveable { mutableStateOf(Prefs.autoSelectCdn) }
     var accelerated by rememberSaveable { mutableStateOf(Prefs.parallelDownloadEnabled) }
     var visualization by rememberSaveable { mutableStateOf(Prefs.showParallelDownloads) }
     var progressSize by rememberSaveable { mutableStateOf(Prefs.downloadProgressSize) }
@@ -50,6 +51,21 @@ fun CdnOverrideSetting() {
         onCheckedChange = {
             accelerated = it
             Prefs.parallelDownloadEnabled = it
+        },
+    )
+    SettingSwitchListItem(
+        title = "自动选择最优 CDN",
+        supportText =
+            when {
+                accelerated -> "并行下载已接管 CDN 测速与选择"
+                host.isNotBlank() -> "手动固定节点时不自动切换"
+                else -> "起播前测速，播放出错时切换候选节点；下次加载生效"
+            },
+        checked = autoSelect,
+        enabled = !accelerated && host.isBlank(),
+        onCheckedChange = {
+            autoSelect = it
+            Prefs.autoSelectCdn = it
         },
     )
     SettingSwitchListItem(

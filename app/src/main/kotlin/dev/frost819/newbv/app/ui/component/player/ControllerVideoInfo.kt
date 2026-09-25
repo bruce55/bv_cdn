@@ -65,6 +65,7 @@ import dev.frost819.newbv.biliapi.entity.video.VideoShot
 import dev.frost819.newbv.core.focus.touchClickable
 import dev.frost819.newbv.core.theme.BVTheme
 import dev.frost819.newbv.data.datastore.Prefs
+import dev.frost819.newbv.player.download.DownloadBufferedRange
 import dev.frost819.newbv.player.download.DownloadSnapshot
 import kotlinx.coroutines.delay
 
@@ -112,6 +113,7 @@ fun ControllerVideoInfo(
     goTime: Long,
     seekerState: SeekerState,
     downloadSnapshot: DownloadSnapshot? = null,
+    bufferedRanges: List<DownloadBufferedRange>? = null,
     title: String,
     clock: Pair<Int, Int>,
     onlineWatching: String,
@@ -164,6 +166,7 @@ fun ControllerVideoInfo(
                 goTime = goTime,
                 seekerState = seekerState,
                 downloadSnapshot = downloadSnapshot,
+                bufferedRanges = bufferedRanges,
                 videoShot = videoShot,
                 videoShotCache = videoShotCache,
                 isPgc = isPgc,
@@ -234,7 +237,7 @@ fun ControllerVideoInfoTop(
                     MaterialTheme.typography.headlineSmall.copy(
                         shadow = Shadow(color = Color.Black, blurRadius = 1f),
                     ),
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -250,7 +253,7 @@ fun ControllerVideoInfoTop(
                 Icon(
                     painter = painterResource(id = R.drawable.ic_player_watching),
                     contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.85f),
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
                     modifier = Modifier.size(16.dp),
                 )
                 Text(
@@ -259,7 +262,7 @@ fun ControllerVideoInfoTop(
                         MaterialTheme.typography.bodySmall.copy(
                             shadow = Shadow(color = Color.Black, blurRadius = 1f),
                         ),
-                    color = Color.White.copy(alpha = 0.85f),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
                 )
             }
         }
@@ -276,6 +279,7 @@ fun ControllerVideoInfoBottom(
     goTime: Long,
     seekerState: SeekerState,
     downloadSnapshot: DownloadSnapshot? = null,
+    bufferedRanges: List<DownloadBufferedRange>? = null,
     videoShot: VideoShot?,
     videoShotCache: VideoShotImageCache,
     isPgc: Boolean,
@@ -337,7 +341,7 @@ fun ControllerVideoInfoBottom(
             Text(
                 modifier = Modifier.padding(bottom = 2.dp, start = 24.dp),
                 text = "$timeText / ${seekerState.totalDuration.formatHourMinSec()}",
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 style = TextStyle(shadow = Shadow(color = Color.Black, blurRadius = 1f)),
             )
             if (downloadSnapshot != null) DownloadRequestStatus(downloadSnapshot)
@@ -362,7 +366,10 @@ fun ControllerVideoInfoBottom(
                         end = 24.dp,
                     ).border(
                         width = 1.dp,
-                        color = Color.White.copy(alpha = if (isSeekFocused) 1f else 0f),
+                        color =
+                            MaterialTheme.colorScheme.border.copy(
+                                alpha = if (isSeekFocused) 1f else 0f,
+                            ),
                         shape =
                             androidx.compose.foundation.shape
                                 .RoundedCornerShape(8.dp),
@@ -441,6 +448,7 @@ fun ControllerVideoInfoBottom(
                 bufferedPercentage = seekerState.bufferedPercentage,
                 isPersistentSeek = false,
                 downloadSnapshot = downloadSnapshot,
+                bufferedRanges = bufferedRanges,
             )
         }
 
@@ -513,7 +521,6 @@ fun ControllerVideoInfoBottom(
                             painter = painterResource(id = item.icon),
                             contentDescription = item.description,
                             modifier = Modifier.padding(5.dp),
-                            tint = Color.White,
                         )
                     }
                 }
@@ -542,7 +549,7 @@ private fun Clock(
 ) {
     Text(
         modifier = modifier,
-        color = Color.White,
+        color = MaterialTheme.colorScheme.onSurface,
         fontWeight = FontWeight.Bold,
         style = TextStyle(shadow = Shadow(color = Color.Black, blurRadius = 1f)),
         text =

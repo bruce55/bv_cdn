@@ -759,6 +759,7 @@ class DownloadMonitor(
             synchronized(this@DownloadMonitor) {
                 if (!closed) {
                     sampleHistory()
+                    val available = availableRanges(residency?.tracks.orEmpty(), localRanges)
                     mutableSnapshots.value =
                         DownloadSnapshot(
                             active,
@@ -778,12 +779,13 @@ class DownloadMonitor(
                             videoProbes,
                             audioProbes,
                             startupProbing && !scheduling.everReady,
-                            availableRanges(residency?.tracks.orEmpty(), localRanges),
+                            available,
                             transferStats(localRanges, inFlightRanges),
                             workTelemetry.workers(),
                             waitReason,
                             scheduling.state,
                             transferMeasurements(localRanges, inFlightRanges),
+                            commonBufferedRanges(available, residency?.tracks.orEmpty()),
                         )
                 }
                 publishing = false
